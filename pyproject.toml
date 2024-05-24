@@ -1,0 +1,70 @@
+[tool.poetry]
+name = "verus"
+version = "0.1.0"
+description = "A tool for image tag prediction and organization."
+authors = ["Nachtalb <na@nachtalb.io>"]
+readme = "README.md"
+license = "LGPL-3.0"
+
+[tool.poetry.dependencies]
+python = "^3.11,<3.12"
+huggingface-hub = "^0.23.1"
+deepdanbooru = "^1.0.2"
+pillow = "^10.3.0"
+tensorflow = "^2.16.1"
+numpy = "^1.26.4"
+tensorflow-io = "^0.37.0"
+tabulate = "^0.9.0"
+tqdm = "^4.66.4"
+
+[tool.poetry.group.dev.dependencies]
+black = "^24.4.2"
+ipdb = "^0.13.13"
+mypy = "^1.10.0"
+isort = "^5.13.2"
+pre-commit = "^3.7.1"
+ruff-lsp = "^0.0.53"
+
+types-tabulate = "^0.9.0.20240106"
+types-tensorflow = "^2.16.0.20240428"
+types-tqdm = "^4.66.0.20240417"
+
+types-pillow = "^10.2.0.20240520"
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+
+[tool.isort]
+profile = "black"
+line_length = 120
+
+[tool.black]
+line-length = 120
+preview = true
+target-version = ["py311"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.mypy]
+python_version = "3.11"
+show_error_codes = true
+pretty = true
+strict = true
+
+[[tool.mypy.overrides]]
+module = 'tests'
+no_warn_no_return = true
+
+[[tool.mypy.overrides]]
+module = 'deepdanbooru'
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = 'huggingface_hub'
+ignore_missing_imports = true
+
+[tool.poetry.scripts]
+verusd = "verus.daemon:main"
+verus = "verus.cli:main"

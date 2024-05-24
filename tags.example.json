@@ -1,0 +1,33 @@
+{
+  "vtuber": {
+    "type": "or",
+    "value": ["hololive", "nijisanji"]
+  },
+  "protagonist": "main_character",
+  "chibi": {
+    "type": "and",
+    "value": [
+      {
+        "type": "regex",
+        "value": "chibi"
+      },
+      "cute"
+    ]
+  },
+  "sci-fi": {
+    "type": "or",
+    "value": [
+      "robot",
+      {
+        "type": "and",
+        "value": [
+          {
+            "type": "regex",
+            "value": "cyber.*"
+          },
+          "future"
+        ]
+      }
+    ]
+  }
+}
