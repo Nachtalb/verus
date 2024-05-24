@@ -40,7 +40,7 @@ class Verus:
         main_tag = self.identify_main_tag(prediction.filtered_tags, self.tags)
         json_data = prediction.to_json() if args.full_json else prediction.filtered_tags
 
-        if args.save:
+        if args.save_json:
             json_path = args.image.with_suffix(".json")
             json_path.write_text(json.dumps(json_data, indent=2))
 
@@ -79,7 +79,7 @@ class Verus:
                     new_path.parent.mkdir(parents=True, exist_ok=True)
                     file.rename(new_path)
 
-                    if args.save:
+                    if args.save_json:
                         json_path = new_path.with_suffix(".json")
                         data = prediction.to_json() if args.full_json else prediction.filtered_tags
                         json_path.write_text(json.dumps(data, indent=2))
