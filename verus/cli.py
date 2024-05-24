@@ -63,7 +63,7 @@ class Verus:
         self.logger.info("Moving images from %s to %s", args.path, args.output)
 
         types = ["*.png", "*.jpeg", "*.jpg"]
-        files = list(chain(*[args.path.glob(t) for t in types]))
+        files = list(chain(*[args.path.rglob(t) for t in types]))
 
         for file in tqdm(files):
             prediction = self.client.predict(file, args.threshold)
