@@ -92,6 +92,7 @@ def main() -> None:
     parser.add_argument("--tags", type=Path, default=Path("tags.json"), help="Path to the tags configuration file.")
     parser.add_argument("--host", type=str, default="localhost", help="Host to run the daemon.")
     parser.add_argument("--port", type=int, default=65432, help="Port to run the daemon.")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose logging.")
 
     sub_parsers = parser.add_subparsers()
 
@@ -126,10 +127,20 @@ def main() -> None:
         parser.print_help()
         exit(1)
 
-    if func := getattr(verus, args.func, None):
-        func(args)
-    else:
-        raise ValueError(f"Invalid function {args.func}")
+    if args.verbose:
+        verus.logger.setLevel(logging.DEBUG)
+
+    try:
+        if func := getattr(verus, args.func, None):
+            func(args)
+        else:
+            raise ValueError(f"Invalid function {args.func}")
+    except KeyboardInterrupt:
+        verus.logger.info("Verus stopped by user")
+    except Exception as e:
+        if args.verbose:
+            verus.logger.error(e, exc_info=True)
+        verus.logger.error("Verus stopped due to an error, {e.__class__.__name__}: {e}")
 
 
 if __name__ == "__main__":
