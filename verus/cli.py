@@ -140,7 +140,7 @@ def main() -> None:
     except Exception as e:
         if args.verbose:
             verus.logger.error(e, exc_info=True)
-        verus.logger.error("Verus stopped due to an error, {e.__class__.__name__}: {e}")
+        verus.logger.error(f"Verus stopped due to an error, {e.__class__.__name__}: {e}")
 
 
 if __name__ == "__main__":
