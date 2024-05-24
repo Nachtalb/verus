@@ -33,7 +33,7 @@ class PredictDaemon:
     def _create_hash(self, data: Any) -> str:
         return sha256(data).hexdigest()
 
-    def load_model(self) -> tf.keras.Model[Any, Any]:
+    def load_model(self) -> tf.keras.Model:  # type: ignore[type-arg]
         self.logger.info("Loading model")
         path = hug.hf_hub_download("public-data/DeepDanbooru", "model-resnet_custom_v3.h5")
         model = tf.keras.models.load_model(path)
