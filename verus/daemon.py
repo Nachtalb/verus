@@ -10,10 +10,11 @@ import deepdanbooru as dd
 import huggingface_hub as hug
 import numpy as np
 import tensorflow as tf
-from PIL import Image
+from PIL import Image, ImageFile
 
 from verus.utils import receive_all
 
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 tf.experimental.numpy.experimental_enable_numpy_behavior()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
