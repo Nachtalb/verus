@@ -1,9 +1,8 @@
 import hashlib
-import json
 import logging
-import sys
 from argparse import ArgumentParser
 from concurrent.futures import ProcessPoolExecutor
+from contextlib import nullcontext
 from io import BytesIO
 from itertools import chain
 from pathlib import Path
@@ -16,6 +15,7 @@ from telegram.constants import ParseMode
 from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, ContextTypes, PicklePersistence
 from tqdm import tqdm
 
+from verus.telegram.db import DATABASE, History, Media, Tag, history_action, setup_db
 from verus.utils import resize_image_max_side_length, tqdm_logging_context
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -24,142 +24,128 @@ MAX_IMAGE_SIDE_LENGTH = 10_000
 MAX_IMAGE_BYTES = 10_000_000  # 10 MB
 
 
-class Bot:
-    file_types = ["jpg", "jpeg", "png"]  # , "gif"]
-    file_hash_cache = Path("hashes.json")
-
-    def __init__(self, authorized_user_id: int, image_dir: Path, log_file: Path):
-        self.logger = logging.getLogger(__name__)
-        self.authorized_user_id = authorized_user_id
+class Indexer:
+    def __init__(self, image_dir: Path, extensions: list[str] = ["jpg", "jpeg", "png"]):
         self.image_dir = image_dir
-        self.log_file = log_file
-        self.log: list[dict[str, str]] = []
+        self.extensions = extensions
+        self.logger = logging.getLogger(__name__)
 
-        self.images: dict[str, Path] = {}
-        self.categories: list[str] = []
+    def index(self) -> list[Media]:
+        self.logger.info("Indexing images in %s", self.image_dir)
 
-        self.processed_hashes: set[str] = set()
+        with DATABASE.atomic():
+            tags = {path.name: Tag.get_or_create(path.name) for path in self.image_dir.iterdir() if path.is_dir()}
 
-        self._load_log()
-        self._load_images()
+            known_images = Media.select()
+            last_id = 0
+            if known_images:
+                last_id = Media.select().first().id
+
+            images = list(chain(*[self.image_dir.rglob(f"*.{ext}") for ext in self.extensions]))
+            images.sort()
+            new_images = set(images) - {Path(image.path) for image in known_images}
+
+            self.logger.info("Found %d new images", len(new_images))
+            hashes = self._load_image_hashes(list(new_images))
+
+            self.logger.info("Inserting new images into the database")
+            Media.insert_many([{"path": str(image), "sha256": hash} for image, hash in hashes.items()]).execute()
+            inserted_images = Media.select().where(Media.id > last_id)
+
+            for path, image in tqdm(zip(new_images, inserted_images), desc="Adding tags"):
+                image.tags.add(tags[path.parent.name])
+                image.save()
+
+        return Media.select()  # type: ignore[no-any-return]
 
     def _load_image_hashes(self, images: list[Path]) -> dict[Path, str]:
-        cache: dict[Path, str] = {}
-
-        if self.file_hash_cache.exists():
-            self.logger.info("Loading image hashes from cache...")
-            cache = {Path(path): hash for path, hash in json.loads(self.file_hash_cache.read_text()).items()}
-
-        new_images = [image for image in images if image not in cache]
-
         with tqdm_logging_context():
             with ProcessPoolExecutor() as executor:
-                new_image_hashes = dict(
-                    zip(images, tqdm(executor.map(self._get_image_hash, new_images), total=len(new_images)))
-                )
-
-        cache.update(new_image_hashes)
-        self.file_hash_cache.write_text(json.dumps({str(path): hash for path, hash in cache.items()}))
-
-        return cache
-
-    def _save_cache(self) -> None:
-        self.file_hash_cache.write_text(json.dumps({str(path): hash for hash, path in self.images.items()}))
-
-    def _load_images(self) -> None:
-        self.logger.info("Loading images...")
-
-        image_paths = list(chain(*[self.image_dir.rglob(f"*.{ext}") for ext in self.file_types]))
-        images: dict[Path, str] = self._load_image_hashes(image_paths)
-
-        total_duplicates = len(images) - len(set(images.values()))
-        if total_duplicates:
-            self.logger.warning(f"Found {total_duplicates} duplicate images.")
-            self.logger.warning("Delete duplicates? (y/n)")
-
-            if input().lower() == "y":
-                for image, image_hash in images.items():
-                    if list(images.values()).count(image_hash) > 1:
-                        image.unlink()
-            else:
-                self.logger.warning("Exiting...")
-                sys.exit(1)
-
-        for image, image_hash in images.items():
-            self.images[image_hash] = image
-
-        self.categories = [cat.name for cat in self.image_dir.iterdir() if cat.is_dir()]
-
-    def _load_log(self) -> None:
-        self.logger.info("Loading log...")
-        if not self.log_file.exists():
-            self.log_file.write_text("[]")
-
-        self.log = json.loads(self.log_file.read_text())
-        self.processed_hashes = {entry["hash"] for entry in self.log}
-
-    def _add_log(self, name: str, sha256: str, from_category: str, to_category: str, action: str) -> None:
-        self.log.append(
-            {
-                "filename": name,
-                "hash": sha256,
-                "from": from_category,
-                "to": to_category,
-                "action": action,
-            }
-        )
-        self.processed_hashes.add(sha256)
-        self.log_file.write_text(json.dumps(self.log))
-
-    def _save_log(self) -> None:
-        self.log_file.write_text(json.dumps(self.log))
-
-    def _log_contains_hash(self, image_hash: str) -> bool:
-        return image_hash in self.processed_hashes
+                return dict(zip(images, tqdm(executor.map(self._get_image_hash, images), total=len(images))))
 
     def _get_image_hash(self, image_path: Path) -> str:
         hasher = hashlib.sha256(image_path.read_bytes())
 
         return hasher.hexdigest()
 
-    def _undo(self, sha256: str) -> None:
-        self.logger.info("Undo: %s", sha256)
-        last_move = next(
-            (entry for entry in reversed(self.log) if entry["hash"] == sha256),
-            None,
-        )
 
-        if last_move:
-            self.log.remove(last_move)
-            self.processed_hashes.remove(sha256)
-            self._save_log()
+class Bot:
+    def __init__(self, authorized_user_id: int):
+        self.logger = logging.getLogger(__name__)
+        self.authorized_user_id = authorized_user_id
 
-            if last_move["action"] == "move":
-                self._move(sha256, last_move["to"], last_move["from"], add_log=False)
+        self.toggle_mode: bool = False
+        self.tags = Tag.select()
 
-    def _move(self, sha256: str, from_category: str, to_category: str, add_log: bool = True) -> None:
-        self.logger.info("Move: %s", sha256)
-        image = self.images[sha256]
-        new_path = self.image_dir / to_category / image.name
-        image.rename(new_path)
+    def _undo(self, media: Media) -> None:
+        self.logger.info("Undo: %s", media.path)
+        if last_action := media.last_action:
+            last_action.undo()
 
-        if add_log:
-            self._add_log(image.name, sha256, from_category, to_category, "move")
+    def _move(self, media: Media, to_tag: str | Tag, fill_history: bool = True) -> None:
+        self.logger.info("Move: %s to %s", media.path, to_tag)
 
-        self.images[sha256] = new_path
-        self._save_cache()
+        with history_action(media, action="move") if fill_history else nullcontext():
+            media.tags.clear()
+            media.tags.add(Tag.get_or_create(to_tag))
+            media.processed = True
 
-    def _prepare_image(self, image: Path) -> BytesIO:
+    def _toggle(self, media: Media, to_tag: str | Tag, fill_history: bool = True) -> None:
+        self.logger.info("Toggle: %s, %s", media.path, to_tag)
+
+        tag = Tag.get_or_create(to_tag)
+        if tag in media.tags:
+            media.tags.remove(tag)
+        else:
+            media.tags.add(Tag.get_or_create(to_tag))
+
+    def _continue(self, media: Media) -> None:
+        self.logger.info("Continue: %s", media.path)
+        media.processed = True
+        media.save()
+
+    def _prepare_image(self, image: Path | str) -> BytesIO:
+        image = Path(image)
         pil_image = Image.open(image)
+        changed = False
 
+        # Convert image to JPEG to reduce size
+        if image.stat().st_size > MAX_IMAGE_BYTES:
+            changed = True
+
+        # Resize image if any side is longer than MAX_IMAGE_SIDE_LENGTH
         if sum(pil_image.size) > MAX_IMAGE_SIDE_LENGTH:
             pil_image = resize_image_max_side_length(pil_image, MAX_IMAGE_SIDE_LENGTH)
+            changed = True
+
+        #  Width and height ratio must be at most 20, crop center otherwise
+        if pil_image.width / pil_image.height > 20:
+            pil_image = pil_image.crop(
+                (
+                    pil_image.width // 2 - pil_image.height // 2,
+                    0,
+                    pil_image.width // 2 + pil_image.height // 2,
+                    pil_image.height,
+                )
+            )
+            changed = True
+        elif pil_image.height / pil_image.width > 20:
+            pil_image = pil_image.crop(
+                (
+                    0,
+                    pil_image.height // 2 - pil_image.width // 2,
+                    pil_image.width,
+                    pil_image.height // 2 + pil_image.width // 2,
+                )
+            )
+            changed = True
+
+        if changed:
             bytes_ = BytesIO()
-            pil_image.save(bytes_, format="JPEG", quality=70)
-            bytes_.seek(0)
-            return bytes_
-        elif image.stat().st_size > MAX_IMAGE_BYTES:
-            bytes_ = BytesIO()
+            if pil_image.mode == "RGBA":
+                white = Image.new("RGB", pil_image.size, "WHITE")
+                white.paste(pil_image, (0, 0), pil_image)
+                pil_image = white
             pil_image.save(bytes_, format="JPEG", quality=70)
             bytes_.seek(0)
             return bytes_
@@ -167,7 +153,7 @@ class Bot:
         pil_image.close()
         return BytesIO(image.read_bytes())
 
-    async def _next_image(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def _next_image(self, update: Update) -> None:
         is_update = update.callback_query is not None
 
         message = update.callback_query.message if is_update else update.message  # type: ignore[union-attr]
@@ -175,12 +161,8 @@ class Bot:
         if message is None:
             return
 
-        sha256, image = next(
-            ((sha256, image) for sha256, image in self.images.items() if sha256 not in self.processed_hashes),
-            (None, None),
-        )
-
-        if not image or not sha256:
+        media = Media.unprocessed().first()
+        if media is None:
             if is_update:
                 await message.delete()  # type: ignore[union-attr]
                 await message.chat.send_message("No more images to process.")
@@ -188,30 +170,31 @@ class Bot:
                 await message.reply_text("No more images to process.")  # type: ignore[union-attr]
             return
 
-        raw_image = self._prepare_image(image)
+        raw_image = self._prepare_image(media.path)
 
-        self.logger.info("Current image: %s %s", sha256, image)
+        self.logger.info("Current image: %s %s", media.path, media.sha256)
 
-        category = image.parent.name
-        reply_markup = self._buttons(sha256)
+        reply_markup = self._buttons(media)
 
-        context.chat_data["image_hash"] = sha256  # type: ignore[index]
-
+        categories = ", ".join([tag.name for tag in media.tags])
+        processed_images = Media.select().where(Media._processed == True).count()  # noqa: E712
+        total_images = Media.select().count()
         caption = (
-            f"**{category}**\n"
-            f"`{image.name}`\n"
-            f"`{sha256}`\n"
-            f"{len(self.processed_hashes)}/{len(self.images)} {len(self.processed_hashes) / len(self.images) * 100:.2f}%"
+            f"<b>Category: {categories}</b>\n"
+            f"Mode: {'toggle' if self.toggle_mode else 'move'}\n"
+            f"Name: <code>{Path(media.path).name}</code>\n"
+            f"SHA256: <code>{media.sha256}</code>\n"
+            f"Progress: {processed_images}/{total_images} {processed_images/total_images*100:.2f}%"
         )
 
         if is_update:
             await message.edit_media(  # type: ignore[union-attr]
-                media=InputMediaPhoto(media=raw_image, caption=caption, parse_mode=ParseMode.MARKDOWN),
+                media=InputMediaPhoto(media=raw_image, caption=caption, parse_mode=ParseMode.HTML),
                 reply_markup=reply_markup,
             )
         else:
             await message.reply_photo(  # type: ignore[union-attr]
-                photo=raw_image, caption=caption, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN
+                photo=raw_image, caption=caption, reply_markup=reply_markup, parse_mode=ParseMode.HTML
             )
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -222,39 +205,34 @@ class Bot:
             await update.message.reply_text("Unauthorized access.")
             return
 
-        await self._next_image(update, context)
+        await self._next_image(update)
 
-    def _buttons(self, image_hash: str) -> InlineKeyboardMarkup:
+    def _buttons(self, media: Media) -> InlineKeyboardMarkup:
         categories = chunk_iterable(
             [
                 InlineKeyboardButton(
-                    cat,
-                    callback_data=("move", image_hash, cat),
+                    ("✅" if cat in media.tags else "") + cat.name,
+                    callback_data=("toggle" if self.toggle_mode else "move", media.path, cat.name),
                 )
-                for cat in self.categories
+                for cat in self.tags
             ],
             3,
         )
 
         buttons = [
-            [InlineKeyboardButton("Continue", callback_data=("continue", image_hash, ""))],
+            [InlineKeyboardButton("Continue", callback_data=("continue", media.path, ""))],
             *[list(row) for row in categories],
+            [
+                InlineKeyboardButton(
+                    "Mode: " + ("Toggle" if self.toggle_mode else "Move"), callback_data=("toggle_mode", "", "")
+                )
+            ],
         ]
 
-        if self.log and (last_image := self.log[-1]["hash"]):
-            buttons.append([InlineKeyboardButton("Undo", callback_data=("undo", last_image, ""))])
+        if latest_action := History.latest_action():
+            buttons.append([InlineKeyboardButton("Undo", callback_data=("undo", latest_action.media.path, ""))])
 
         return InlineKeyboardMarkup(buttons)
-
-    def _continue(self, image_hash: str) -> None:
-        self.logger.info("Continue: %s", image_hash)
-        self._add_log(
-            self.images[image_hash].name,
-            image_hash,
-            self.images[image_hash].parent.name,
-            "",
-            "continue",
-        )
 
     async def button(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
@@ -263,20 +241,29 @@ class Bot:
 
         await query.answer()
 
-        action, hash, category = cast(tuple[str, str, str], query.data)
+        action, path, category = cast(tuple[str, str, str], query.data)
 
-        if action == "continue":
-            self._continue(hash)
-        elif action == "move":
-            self._move(hash, self.images[hash].parent.name, category)
-        elif action == "undo":
-            self._undo(hash)
+        if action in ["continue", "move", "toggle", "undo"]:
+            media = Media.get_or_none(Media.path == path)
+
+            with DATABASE.atomic():
+                if action == "continue":
+                    self._continue(media)
+                elif action == "move":
+                    self._move(media, category)
+                elif action == "toggle":
+                    self._toggle(media, category)
+                elif action == "undo":
+                    self._undo(media)
+
+        elif action == "toggle_mode":
+            self.toggle_mode = not self.toggle_mode
         else:
             self.logger.error(f"Unknown action: {action}")
             return
 
         context.drop_callback_data(query)
-        await self._next_image(update, context)
+        await self._next_image(update)
 
 
 def main() -> None:
@@ -285,6 +272,7 @@ def main() -> None:
     parser.add_argument("--dir", type=Path, required=True)
     parser.add_argument("--token", required=True)
     parser.add_argument("--log", type=Path, default=Path("log.json"))
+    parser.add_argument("--db", type=Path, default=Path("verus.db"))
 
     sub_parsers = parser.add_subparsers()
     webhook_parser = sub_parsers.add_parser("webhook")
@@ -297,7 +285,12 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    bot = Bot(args.user, args.dir, args.log)
+    setup_db(args.db)
+
+    indexer = Indexer(args.dir)
+    indexer.index()
+
+    bot = Bot(args.user)
 
     persistence = PicklePersistence(filepath="verus_bot")
     app = ApplicationBuilder().token(args.token).persistence(persistence).arbitrary_callback_data(True).build()

@@ -1316,6 +1316,16 @@ files = [
 ]
 
 [[package]]
+name = "peewee"
+version = "3.17.5"
+description = "a little orm"
+optional = false
+python-versions = "*"
+files = [
+    {file = "peewee-3.17.5.tar.gz", hash = "sha256:e1b6a64192207fd3ddb4e1188054820f42aef0aadfa749e3981af3c119a76420"},
+]
+
+[[package]]
 name = "pexpect"
 version = "4.9.0"
 description = "Pexpect allows easy control of interactive console applications."
@@ -2124,6 +2134,17 @@ docs = ["myst-parser", "pydata-sphinx-theme", "sphinx"]
 test = ["argcomplete (>=3.0.3)", "mypy (>=1.7.0)", "pre-commit", "pytest (>=7.0,<8.2)", "pytest-mock", "pytest-mypy-testing"]
 
 [[package]]
+name = "types-peewee"
+version = "3.17.3.20240424"
+description = "Typing stubs for peewee"
+optional = false
+python-versions = ">=3.8"
+files = [
+    {file = "types-peewee-3.17.3.20240424.tar.gz", hash = "sha256:4620860b16f0b27c840e24048edcc5a534d0f167abc2534a3bb211433eb81017"},
+    {file = "types_peewee-3.17.3.20240424-py3-none-any.whl", hash = "sha256:8d4c2dfdef6c82ed94e0cfe0165d38d88329cb395232b25320461e866cb067a0"},
+]
+
+[[package]]
 name = "types-pillow"
 version = "10.2.0.20240520"
 description = "Typing stubs for Pillow"
@@ -2397,4 +2418,4 @@ files = [
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.11,<3.12"
-content-hash = "02c020133e98f8d01ca1a82a03b4154b9db991083a38173d87339a28d38781ea"
+content-hash = "2b8f5ac9ea69aa06143334ac939316c39cec7971110f65666603fe78d79766e9"
