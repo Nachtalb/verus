@@ -33,7 +33,7 @@ class Verus:
         self.logger.info("Identifying image %s", args.image)
         if not args.image.is_file():
             raise ValueError("Output must be a file")
-        elif args.image.suffix not in [".png", ".jpeg", ".jpg"]:
+        elif args.image.suffix not in [".png", ".jpeg", ".jpg", ".gif"]:
             raise ValueError("Output must be a png or jpeg file")
 
         prediction = self.client.predict(args.image, args.threshold)
@@ -62,7 +62,7 @@ class Verus:
     def move(self, args: Namespace) -> None:
         self.logger.info("Moving images from %s to %s", args.path, args.output)
 
-        types = ["*.png", "*.jpeg", "*.jpg"]
+        types = ["*.png", "*.jpeg", "*.jpg", "*.gif"]
         files = list(chain(*[args.path.rglob(t) for t in types]))
 
         for file in tqdm(files):
