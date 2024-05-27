@@ -285,6 +285,16 @@ def main() -> None:
     parser.add_argument("--dir", type=Path, required=True)
     parser.add_argument("--token", required=True)
     parser.add_argument("--log", type=Path, default=Path("log.json"))
+
+    sub_parsers = parser.add_subparsers()
+    webhook_parser = sub_parsers.add_parser("webhook")
+    webhook_parser.add_argument("--webhook-url", required=True)
+    webhook_parser.add_argument("--webhook-path", default="")
+    webhook_parser.add_argument("--listen", default="0.0.0.0")
+    webhook_parser.add_argument("--port", type=int, default=8433)
+
+    webhook_parser.set_defaults(webhook=True)
+
     args = parser.parse_args()
 
     bot = Bot(args.user, args.dir, args.log)
@@ -294,7 +304,17 @@ def main() -> None:
     app.add_handler(CommandHandler("start", bot.start))
     app.add_handler(CallbackQueryHandler(bot.button))
 
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    if hasattr(args, "webhook"):
+        app.run_webhook(
+            listen=args.listen,
+            port=args.port,
+            webhook_url=args.webhook_url,
+            url_path=args.webhook_path,
+            secret_token="ASecretTokenIHaveChangedByNow",
+            #  allowed_updates=Update.ALL_TYPES,
+        )
+    else:
+        app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
 if __name__ == "__main__":
