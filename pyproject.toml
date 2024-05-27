@@ -75,4 +75,4 @@ ignore_missing_imports = true
 [tool.poetry.scripts]
 verusd = "verus.daemon:main"
 verus = "verus.cli:main"
-gerus-bot = "verus.telegram.bot:main"
+verus-bot = "verus.telegram.bot:main"
