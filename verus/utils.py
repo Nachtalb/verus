@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from functools import wraps
 from typing import Any, Callable, Generator
 
+from PIL.Image import Image
 from tqdm import tqdm
 
 
@@ -72,3 +73,36 @@ def with_tqdm_logging(func: Callable[..., Any]) -> Callable[..., Any]:
             return func(*args, **kwargs)
 
     return wrapper
+
+
+def resize_image_to(image: Image, max_width: int, max_height: int) -> Image:
+    """Resize an image to fit within the specified dimensions while maintaining the aspect ratio."""
+
+    width, height = image.size
+    aspect_ratio = width / height
+
+    if width > max_width:
+        width = max_width
+        height = int(width / aspect_ratio)
+
+    if height > max_height:
+        height = max_height
+        width = int(height * aspect_ratio)
+
+    return image.resize((width, height))
+
+
+def resize_image_max_side_length(image: Image, max_total_side_length: int) -> Image:
+    """Resize an image to fit within the specified total side length while maintaining the aspect ratio."""
+
+    width, height = image.size
+    total_side_length = width + height
+
+    if total_side_length > max_total_side_length:
+        new_total_side_length = max_total_side_length
+        new_width = int(new_total_side_length * (width / total_side_length))
+        new_height = int(new_total_side_length * (height / total_side_length))
+
+        return image.resize((new_width, new_height))
+
+    return image

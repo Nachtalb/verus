@@ -338,3 +338,6 @@ $RECYCLE.BIN/
 # End of https://www.toptal.com/developers/gitignore/api/python,vim,visualstudiocode,windows,linux,macos,emacs
 
 tags.json
+hashes.json
+log.json
+verus_bot
