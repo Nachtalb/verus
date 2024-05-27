@@ -2134,17 +2134,6 @@ docs = ["myst-parser", "pydata-sphinx-theme", "sphinx"]
 test = ["argcomplete (>=3.0.3)", "mypy (>=1.7.0)", "pre-commit", "pytest (>=7.0,<8.2)", "pytest-mock", "pytest-mypy-testing"]
 
 [[package]]
-name = "types-peewee"
-version = "3.17.3.20240424"
-description = "Typing stubs for peewee"
-optional = false
-python-versions = ">=3.8"
-files = [
-    {file = "types-peewee-3.17.3.20240424.tar.gz", hash = "sha256:4620860b16f0b27c840e24048edcc5a534d0f167abc2534a3bb211433eb81017"},
-    {file = "types_peewee-3.17.3.20240424-py3-none-any.whl", hash = "sha256:8d4c2dfdef6c82ed94e0cfe0165d38d88329cb395232b25320461e866cb067a0"},
-]
-
-[[package]]
 name = "types-pillow"
 version = "10.2.0.20240520"
 description = "Typing stubs for Pillow"
@@ -2418,4 +2407,4 @@ files = [
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.11,<3.12"
-content-hash = "2b8f5ac9ea69aa06143334ac939316c39cec7971110f65666603fe78d79766e9"
+content-hash = "47ffeb322e72deb5663ef06ccdf4cb24954cad724befe2372bb6b071e2c22e1d"

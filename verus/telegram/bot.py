@@ -164,10 +164,10 @@ class Bot:
         if message is None:
             return
 
-        media = Media.unprocessed().first()  # type: ignore[attr-defined]
+        media = Media.unprocessed().first()
         while not Path(media.path).exists():
             media.delete_instance()
-            media = Media.unprocessed().first()  # type: ignore[attr-defined]
+            media = Media.unprocessed().first()
 
         if media is None:
             if is_update:
