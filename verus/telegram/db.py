@@ -19,15 +19,18 @@ from playhouse.sqlite_ext import JSONField
 DATABASE: SqliteDatabase = SqliteDatabase("verus.db")
 
 
-class BaseModel(Model):  # type: ignore[misc]
+class BaseModel(Model):
     class Meta:
         database = DATABASE
 
-    def to_dict(self) -> dict[str, Any]:
-        return model_to_dict(self, backrefs=True, recurse=True)  # type: ignore[no-any-return]
+    def to_dict(self, exceptions: list[str] = []) -> dict[str, Any]:
+        data = model_to_dict(self, backrefs=True, recurse=True)  # type: ignore[no-untyped-call]
+        for key in exceptions:
+            data.pop(key, None)
+        return data
 
-    def to_json(self) -> str:
-        data = self.to_dict()
+    def to_json(self, exceptions: list[str] = []) -> str:
+        data = self.to_dict(exceptions=exceptions)
         for key, value in data.items():
             if isinstance(value, datetime):
                 data[key] = value.isoformat()
@@ -35,7 +38,7 @@ class BaseModel(Model):  # type: ignore[misc]
 
     @classmethod
     def from_dict(cls, data: dict[str, Any], force_insert: bool = False) -> "BaseModel":
-        instance = dict_to_model(cls, data)
+        instance = dict_to_model(cls, data)  # type: ignore[no-untyped-call]
         instance.save(force_insert=force_insert)
         return instance  # type: ignore[no-any-return]
 
@@ -43,7 +46,7 @@ class BaseModel(Model):  # type: ignore[misc]
     def from_json(cls, data: str, force_insert: bool = False) -> "BaseModel":
         json_data = json.loads(data)
         for key, value in json_data.items():
-            if value is not None and cls._meta.fields.get(key) == DateTimeField:
+            if value is not None and cls._meta.fields.get(key) == DateTimeField:  # type: ignore[attr-defined]
                 json_data[key] = datetime.fromisoformat(value)
         return cls.from_dict(json_data, force_insert=force_insert)
 
@@ -52,7 +55,7 @@ class Tag(BaseModel):
     name = CharField(unique=True)
 
     def __str__(self) -> str:
-        return self.name  # type: ignore[no-any-return]
+        return self.name  # type: ignore[return-value]
 
     @staticmethod
     def get_or_create(name: str) -> "Tag":
@@ -70,11 +73,11 @@ class Media(BaseModel):
     _processed_at = DateTimeField(null=True)
 
     def __str__(self) -> str:
-        return self.path  # type: ignore[no-any-return]
+        return self.path  # type: ignore[return-value]
 
     @staticmethod
     def unprocessed() -> Query:
-        return Media.select().where(Media._processed == False)  # noqa: E712
+        return Media.select().order_by(Media.path).where(Media._processed == False)  # type: ignore[no-any-return]  # noqa: E712
 
     @staticmethod
     def get_or_create(
@@ -126,7 +129,15 @@ class History(BaseModel):
 
     def undo(self) -> None:
         media = self.media
-        media.from_dict(self.before, force_insert=True)
+
+        media.path = self.before["path"]
+        media.sha256 = self.before["sha256"]
+        media.tags.clear()
+        tags = [row["tag"]["name"] for row in self.before["mediatagthrough_set"]]
+        media.tags.add([Tag.get_or_create(tag) for tag in tags])
+        media._processed = self.before["_processed"]
+        media._processed_at = self.before["_processed_at"]
+        media.save()
         self.delete_instance()
 
     @staticmethod
@@ -139,9 +150,9 @@ MediaTag = Media.tags.get_through_model()
 
 @contextmanager
 def history_action(media: Media, action: str, data: dict[str, Any] = {}) -> Generator[None, None, None]:
-    before = json.loads(media.to_json())
+    before = json.loads(media.to_json(exceptions=["history"]))
     yield
-    after = json.loads(media.to_json())
+    after = json.loads(media.to_json(exceptions=["history"]))
     History.create(media=media, action=action, before=before, after=after, data=data)
 
 

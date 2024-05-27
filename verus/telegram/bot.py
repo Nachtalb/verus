@@ -93,16 +93,18 @@ class Bot:
     def _toggle(self, media: Media, to_tag: str | Tag, fill_history: bool = True) -> None:
         self.logger.info("Toggle: %s, %s", media.path, to_tag)
 
-        tag = Tag.get_or_create(to_tag)
-        if tag in media.tags:
-            media.tags.remove(tag)
-        else:
-            media.tags.add(Tag.get_or_create(to_tag))
+        with history_action(media, action="toggle") if fill_history else nullcontext():
+            tag = Tag.get_or_create(to_tag)
+            if tag in media.tags:
+                media.tags.remove(tag)
+            else:
+                media.tags.add(Tag.get_or_create(to_tag))
 
     def _continue(self, media: Media) -> None:
         self.logger.info("Continue: %s", media.path)
-        media.processed = True
-        media.save()
+        with history_action(media, action="continue"):
+            media.processed = True
+            media.save()
 
     def _prepare_image(self, image: Path | str) -> BytesIO:
         image = Path(image)
