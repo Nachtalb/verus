@@ -241,7 +241,7 @@ class Bot:
             *[list(row) for row in categories],
         ]
 
-        if last_image := self.log[-1]["hash"]:
+        if self.log and (last_image := self.log[-1]["hash"]):
             buttons.append([InlineKeyboardButton("Undo", callback_data=("undo", last_image, ""))])
 
         return InlineKeyboardMarkup(buttons)
