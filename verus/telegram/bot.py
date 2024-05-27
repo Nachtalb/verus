@@ -161,7 +161,11 @@ class Bot:
         if message is None:
             return
 
-        media = Media.unprocessed().first()
+        media = Media.unprocessed().first()  # type: ignore[attr-defined]
+        while not Path(media.path).exists():
+            media.delete_instance()
+            media = Media.unprocessed().first()  # type: ignore[attr-defined]
+
         if media is None:
             if is_update:
                 await message.delete()  # type: ignore[union-attr]
