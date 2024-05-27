@@ -12,6 +12,7 @@ from huggingface_hub.utils import chunk_iterable
 from PIL import Image
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, Update
 from telegram.constants import ParseMode
+from telegram.error import BadRequest
 from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, ContextTypes, PicklePersistence
 from tqdm import tqdm
 
@@ -193,15 +194,21 @@ class Bot:
             f"Progress: {processed_images}/{total_images} {processed_images/total_images*100:.2f}%"
         )
 
-        if is_update:
-            await message.edit_media(  # type: ignore[union-attr]
-                media=InputMediaPhoto(media=raw_image, caption=caption, parse_mode=ParseMode.HTML),
-                reply_markup=reply_markup,
-            )
-        else:
-            await message.reply_photo(  # type: ignore[union-attr]
-                photo=raw_image, caption=caption, reply_markup=reply_markup, parse_mode=ParseMode.HTML
-            )
+        try:
+            if is_update:
+                await message.edit_media(  # type: ignore[union-attr]
+                    media=InputMediaPhoto(media=raw_image, caption=caption, parse_mode=ParseMode.HTML),
+                    reply_markup=reply_markup,
+                )
+            else:
+                await message.reply_photo(  # type: ignore[union-attr]
+                    photo=raw_image, caption=caption, reply_markup=reply_markup, parse_mode=ParseMode.HTML
+                )
+        except BadRequest as e:
+            if "Image_process_failed" in str(e):
+                self.logger.error("Image processing failed for %s", media.path)
+                media.delete_instance()
+                await self._next_image(update)
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_user or not update.message:
