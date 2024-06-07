@@ -108,6 +108,7 @@ class Bot:
             media.save()
 
     def _prepare_image(self, image: Path | str) -> BytesIO:
+        self.logger.info("Preparing image: %s", image)
         image = Path(image)
         pil_image = Image.open(image)
         changed = False
@@ -254,7 +255,11 @@ class Bot:
 
         await query.answer()
 
-        action, path, category = cast(tuple[str, str, str], query.data)
+        try:
+            action, path, category = cast(tuple[str, str, str], query.data)
+        except TypeError:
+            await query.message.delete()
+            return
 
         if action in ["continue", "move", "toggle", "undo"]:
             media = Media.get_or_none(Media.path == path)
