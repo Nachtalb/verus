@@ -1,11 +1,11 @@
 import json
 import socket
+from base64 import b64encode
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
+from io import BytesIO
 from pathlib import Path
 from typing import Any, Generator
-
-import numpy as np
 
 from verus.utils import receive_all
 
@@ -85,14 +85,17 @@ class PredictClient:
 
     def _request(self, data: Any, conn: socket.socket | None = None) -> Any:
         with self._create_or_use_connection(conn) as conn:
-            conn.sendall(json.dumps(data).encode())
+            conn.sendall(json.dumps(data).encode() + b"\n")
             response = receive_all(conn)
 
             return json.loads(response.decode())
 
+    def to_base64(self, data: bytes) -> str:
+        return b64encode(data).decode()
+
     def predict(
         self,
-        image: Path | np.ndarray[Any, Any],
+        image: Path | BytesIO,
         score_threshold: float,
         conn: socket.socket | None = None,
     ) -> Prediction:
@@ -101,8 +104,8 @@ class PredictClient:
         }
         if isinstance(image, Path):
             data["image_path"] = str(image)
-        elif isinstance(image, np.ndarray):
-            data["image"] = image.tolist()
+        elif isinstance(image, BytesIO):
+            data["image"] = self.to_base64(image.getvalue())
         else:
             raise ValueError("Unsupported image type")
 

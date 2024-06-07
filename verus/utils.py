@@ -1,13 +1,12 @@
+import itertools
 import logging
 import socket
 from contextlib import contextmanager
 from functools import wraps
-import itertools
 from typing import Any, Callable, Generator, Iterable, TypeVar
 
 from PIL.Image import Image
 from tqdm import tqdm
-
 
 T = TypeVar("T")
 
@@ -16,9 +15,10 @@ def receive_all(sock: socket.socket, buffer_size: int = 4096) -> bytes:
     data = b""
     while True:
         part = sock.recv(buffer_size)
-        data += part
-        if len(part) < buffer_size:
+        if part[-1:] == b"\n":
+            data += part[:-1]
             break
+        data += part
     return data
 
 
@@ -110,7 +110,6 @@ def resize_image_max_side_length(image: Image, max_total_side_length: int) -> Im
         return image.resize((new_width, new_height))
 
     return image
-
 
 
 def chunk_iterable(iterable: Iterable[T], chunk_size: int) -> Iterable[Iterable[T]]:

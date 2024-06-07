@@ -2,7 +2,9 @@ import argparse
 import json
 import logging
 import socket
+from base64 import b64decode
 from hashlib import sha256
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -46,20 +48,26 @@ class PredictDaemon:
             labels = [line.strip() for line in f.readlines()]
         return labels
 
-    def prepare_image(self, image_input: str) -> np.ndarray[Any, Any]:
-        self.logger.info(f"Loading image from path: {image_input}")
+    def prepare_image(self, image_input: str | BytesIO) -> np.ndarray[Any, Any]:
+        if isinstance(image_input, str):
+            self.logger.info(f"Loading image from path: {image_input}")
+        else:
+            self.logger.info("Loading image from bytes")
         image = Image.open(image_input)
         if image.mode != "RGB":
             image = image.convert("RGB")
-        _, height, width, _ = self.model.input_shape
         np_image = np.asarray(image)
+        return self._prepare_image(np_image)
+
+    def _prepare_image(self, image: np.ndarray[Any, Any]) -> np.ndarray[Any, Any]:
+        _, height, width, _ = self.model.input_shape
         np_image = tf.image.resize(
-            np_image, size=(height, width), method=tf.image.ResizeMethod.AREA, preserve_aspect_ratio=True
+            image, size=(height, width), method=tf.image.ResizeMethod.AREA, preserve_aspect_ratio=True
         )
-        np_image = np_image.numpy()  # type: ignore[attr-defined]
+        np_image = np_image.numpy()
         np_image = dd.image.transform_and_pad_image(np_image, width, height)
         np_image = np_image / 255.0
-        return np_image
+        return np_image  # type: ignore[no-any-return]
 
     def predict(self, image: np.ndarray[Any, Any], score_threshold: float) -> dict[str, float]:
         self.logger.info("Performing prediction")
@@ -107,6 +115,9 @@ class PredictDaemon:
         if sha256:
             CACHE[sha256] = entry
 
+    def _base64_to_bytes(self, base64_str: str) -> bytes:
+        return b64decode(base64_str)
+
     def handle_client(self, conn: socket.socket, addr: tuple[str, int]) -> None:
         self.logger.info(f"Connected by {addr}")
         with conn:
@@ -130,9 +141,15 @@ class PredictDaemon:
                         np_sha256 = self._create_hash(image)
                         cache_result = self._get_cache(np_sha256)
                 else:
-                    image = np.array(data_dict["image"])
-                    np_sha256 = self._create_hash(image)
-                    cache_result = self._get_cache(np_sha256)
+                    raw_image = self._base64_to_bytes(data_dict["image"])
+                    sha256 = self._create_hash(raw_image)
+
+                    cache_result = self._get_cache(sha256)
+
+                    if not cache_result:
+                        image = self.prepare_image(BytesIO(raw_image))
+                        np_sha256 = self._create_hash(image)
+                        cache_result = self._get_cache(np_sha256)
 
                 if not cache_result:
                     tags = self.predict(image, score_threshold)
@@ -153,7 +170,7 @@ class PredictDaemon:
 
                 self._save_cache(tags, np_sha256, sha256)
 
-                conn.sendall(json.dumps(result).encode())
+                conn.sendall(json.dumps(result).encode() + b"\n")
 
     def run(self) -> None:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
