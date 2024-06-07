@@ -94,6 +94,7 @@ class Bot:
             media.tags.clear()
             media.tags.add(Tag.get_or_create(to_tag))
             media.processed = True
+            media.save()
 
     def _toggle(self, media: Media, to_tag: str | Tag, fill_history: bool = True) -> None:
         self.logger.info("Toggle: %s, %s", media.path, to_tag)
