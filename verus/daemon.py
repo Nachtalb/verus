@@ -178,8 +178,11 @@ class PredictDaemon:
             s.listen()
             self.logger.info(f"Daemon listening on {self.host}:{self.port}")
             while True:
-                conn, addr = s.accept()
-                self.handle_client(conn, addr)
+                try:
+                    conn, addr = s.accept()
+                    self.handle_client(conn, addr)
+                except Exception as e:
+                    self.logger.error(f"Error occurred: {e}")
 
 
 def main() -> None:
