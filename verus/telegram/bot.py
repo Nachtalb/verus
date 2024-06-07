@@ -16,11 +16,7 @@ from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandle
 from tqdm import tqdm
 
 from verus.telegram.db import DATABASE, History, Media, Tag, history_action, setup_db
-from verus.utils import (
-    chunk_iterable,
-    resize_image_max_side_length,
-    tqdm_logging_context,
-)
+from verus.utils import chunk_iterable, resize_image_max_side_length, tqdm_logging_context
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
@@ -38,7 +34,11 @@ class Indexer:
         self.logger.info("Indexing images in %s", self.image_dir)
 
         with DATABASE.atomic():
-            tags = {path.name: Tag.get_or_create(path.name) for path in self.image_dir.iterdir() if path.is_dir()}
+            tags = {
+                path.name: Tag.get_or_create(path.name)
+                for path in self.image_dir.iterdir()
+                if path.is_dir() and not path.name.startswith(".")
+            }
 
             known_images = Media.select()
             last_id = 0
@@ -269,7 +269,7 @@ class Bot:
         try:
             action, path, category = cast(tuple[str, str, str], query.data)
         except TypeError:
-            await query.message.delete()
+            await query.message.delete()  # type: ignore[union-attr]
             return
 
         if action in ["continue", "move", "toggle", "undo"]:
