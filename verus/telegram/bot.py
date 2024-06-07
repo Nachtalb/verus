@@ -1,5 +1,6 @@
 import hashlib
 import logging
+import re
 from argparse import ArgumentParser
 from concurrent.futures import ProcessPoolExecutor
 from contextlib import nullcontext
@@ -9,7 +10,15 @@ from pathlib import Path
 from typing import cast
 
 from PIL import Image
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, InputMediaVideo, Update
+from telegram import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    InputMediaPhoto,
+    InputMediaVideo,
+    Message,
+    Update,
+)
 from telegram.constants import ParseMode
 from telegram.error import BadRequest
 from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, ContextTypes, PicklePersistence
@@ -77,6 +86,8 @@ class Indexer:
 
 
 class Bot:
+    _intermediate_group_message: None | tuple[Message, ...] = None
+
     def __init__(self, authorized_user_id: int):
         self.logger = logging.getLogger(__name__)
         self.authorized_user_id = authorized_user_id
@@ -113,6 +124,36 @@ class Bot:
         with history_action(media, action="continue"):
             media.processed = True
             media.save()
+
+    def extract_id(self, filename: str) -> str | None:
+        match = re.search(r"_(\d+)_p\d+\.", filename)
+        return match.group(1) if match else None
+
+    async def send_media_group(self, media: Media, query: CallbackQuery) -> None:
+        if not query.message:
+            # something went wrong
+            return
+        id = self.extract_id(media.path)
+        if media.path.endswith((".mp4", ".webm")) or not id:
+            await query.answer("Has no group")
+            return
+
+        pixiv_url = f"https://www.pixiv.net/artworks/{id}"
+
+        group = Media.select().where(Media.path.contains(id)).order_by(Media.path)
+        media_group = []
+        for index, item in enumerate(group):
+            if index == 0:
+                input_ = InputMediaPhoto(media=self._prepare_image(item.path), caption=f"ID: {id}\nPixiv: {pixiv_url}")
+            else:
+                input_ = InputMediaPhoto(media=self._prepare_image(item.path))
+            media_group.append(input_)
+
+        await query.answer("Sending media group...")
+        messages = []
+        for chunk in chunk_iterable(media_group, 10):
+            messages.extend(await query.message.reply_media_group(list(chunk)))  # type: ignore[attr-defined]
+        self._intermediate_group_message = tuple(messages)
 
     def _prepare_image(self, image: Path | str) -> BytesIO:
         self.logger.info("Preparing image: %s", image)
@@ -262,7 +303,8 @@ class Bot:
             [
                 InlineKeyboardButton(
                     "Mode: " + ("Toggle" if self.toggle_mode else "Move"), callback_data=("toggle_mode", "", "")
-                )
+                ),
+                InlineKeyboardButton("More", callback_data=("more", media.path, "")),
             ],
         ]
 
@@ -276,11 +318,10 @@ class Bot:
         if not query or not query.data:
             return
 
-        await query.answer()
-
         try:
             action, path, category = cast(tuple[str, str, str], query.data)
         except TypeError:
+            await query.answer()
             await query.message.delete()  # type: ignore[union-attr]
             return
 
@@ -297,11 +338,20 @@ class Bot:
                 elif action == "undo":
                     self._undo(media)
 
+                if action in ["move", "continue", "undo"] and self._intermediate_group_message:
+                    for message in self._intermediate_group_message:
+                        await message.delete()
+                    self._intermediate_group_message = None
+        elif action == "more":
+            media = Media.get_or_none(Media.path == path)
+            await self.send_media_group(media, query)
         elif action == "toggle_mode":
             self.toggle_mode = not self.toggle_mode
         else:
             self.logger.error(f"Unknown action: {action}")
+            await query.answer()
             return
+        await query.answer()
 
         context.drop_callback_data(query)
         await self._next_image(update)
