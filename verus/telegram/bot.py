@@ -192,7 +192,7 @@ class Bot:
             return
 
         if media.path.endswith((".mp4", ".webm")):
-            raw_image = BytesIO(media.path.read_bytes())
+            raw_image = BytesIO(Path(media.path).read_bytes())
         else:
             raw_image = self._prepare_image(media.path)
 
