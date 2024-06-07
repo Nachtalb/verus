@@ -8,7 +8,6 @@ from itertools import chain
 from pathlib import Path
 from typing import cast
 
-from huggingface_hub.utils import chunk_iterable
 from PIL import Image
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, Update
 from telegram.constants import ParseMode
@@ -17,7 +16,11 @@ from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandle
 from tqdm import tqdm
 
 from verus.telegram.db import DATABASE, History, Media, Tag, history_action, setup_db
-from verus.utils import resize_image_max_side_length, tqdm_logging_context
+from verus.utils import (
+    chunk_iterable,
+    resize_image_max_side_length,
+    tqdm_logging_context,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
