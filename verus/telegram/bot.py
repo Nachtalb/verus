@@ -58,8 +58,10 @@ class Indexer:
             inserted_images = Media.select().where(Media.id > last_id)
 
             for path, image in tqdm(zip(new_images, inserted_images), desc="Adding tags"):
-                image.tags.add(tags[path.parent.name])
-                image.save()
+                tag = tags[path.parent.name]
+                if tag not in image.tags:
+                    image.tags.add(tag)
+                    image.save()
 
         return Media.select()  # type: ignore[no-any-return]
 
