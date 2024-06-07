@@ -46,6 +46,7 @@ class Indexer:
                 last_id = Media.select().first().id
 
             images = list(chain(*[self.image_dir.rglob(f"*.{ext}") for ext in self.extensions]))
+            images = [image for image in images if "thumb" not in image.name]
             images.sort()
             new_images = set(images) - {Path(image.path) for image in known_images}
 
@@ -113,6 +114,12 @@ class Bot:
     def _prepare_image(self, image: Path | str) -> BytesIO:
         self.logger.info("Preparing image: %s", image)
         image = Path(image)
+        thumb = image.with_name(image.stem + ".thumb.jpg")
+
+        if thumb.is_file():
+            self.logger.info("Using thumbnail %s", thumb)
+            return BytesIO(thumb.read_bytes())
+
         pil_image = Image.open(image)
         changed = False
 
