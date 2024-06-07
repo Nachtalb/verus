@@ -310,7 +310,7 @@ def main() -> None:
 
     bot = Bot(args.user)
 
-    persistence = PicklePersistence(filepath="verus_bot")
+    persistence = PicklePersistence(filepath="verus_bot.dat")
     app = ApplicationBuilder().token(args.token).persistence(persistence).arbitrary_callback_data(True).build()
     app.add_handler(CommandHandler("start", bot.start))
     app.add_handler(CallbackQueryHandler(bot.button))
