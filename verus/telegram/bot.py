@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import cast
 
 from PIL import Image
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, InputMediaVideo, Update
 from telegram.constants import ParseMode
 from telegram.error import BadRequest
 from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, ContextTypes, PicklePersistence
@@ -25,7 +25,7 @@ MAX_IMAGE_BYTES = 10_000_000  # 10 MB
 
 
 class Indexer:
-    def __init__(self, image_dir: Path, extensions: list[str] = ["jpg", "jpeg", "png"]):
+    def __init__(self, image_dir: Path, extensions: list[str] = ["jpg", "jpeg", "png", "mp4"]):
         self.image_dir = image_dir
         self.extensions = extensions
         self.logger = logging.getLogger(__name__)
@@ -189,7 +189,10 @@ class Bot:
                 await message.reply_text("No more images to process.")  # type: ignore[union-attr]
             return
 
-        raw_image = self._prepare_image(media.path)
+        if media.path.endswith((".mp4", ".webm")):
+            raw_image = BytesIO(media.path.read_bytes())
+        else:
+            raw_image = self._prepare_image(media.path)
 
         self.logger.info("Current image: %s %s", media.path, media.sha256)
 
@@ -208,14 +211,21 @@ class Bot:
 
         try:
             if is_update:
+                media_type = InputMediaVideo if media.path.endswith((".mp4", ".webm")) else InputMediaPhoto
+
                 await message.edit_media(  # type: ignore[union-attr]
-                    media=InputMediaPhoto(media=raw_image, caption=caption, parse_mode=ParseMode.HTML),
+                    media=media_type(media=raw_image, caption=caption, parse_mode=ParseMode.HTML),
                     reply_markup=reply_markup,
                 )
             else:
-                await message.reply_photo(  # type: ignore[union-attr]
-                    photo=raw_image, caption=caption, reply_markup=reply_markup, parse_mode=ParseMode.HTML
-                )
+                if media.path.endswith((".mp4", ".webm")):
+                    await message.reply_video(  # type: ignore[union-attr]
+                        video=raw_image, caption=caption, reply_markup=reply_markup, parse_mode=ParseMode.HTML
+                    )
+                else:
+                    await message.reply_photo(  # type: ignore[union-attr]
+                        photo=raw_image, caption=caption, reply_markup=reply_markup, parse_mode=ParseMode.HTML
+                    )
         except BadRequest as e:
             if "Image_process_failed" in str(e):
                 self.logger.error("Image processing failed for %s", media.path)
