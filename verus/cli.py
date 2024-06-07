@@ -1,9 +1,11 @@
 import json
 import logging
 from argparse import ArgumentParser, Namespace
+from io import BytesIO
 from itertools import chain
 from pathlib import Path
 
+import cv2
 from tabulate import tabulate
 from tqdm import tqdm
 
@@ -58,15 +60,30 @@ class Verus:
                 return tag
         return None
 
+    def extract_frame(self, video_path: Path) -> bytes:
+        cap = cv2.VideoCapture(str(video_path))
+        ret, frame = cap.read()
+        cap.release()
+        if not ret:
+            raise ValueError("Failed to extract frame from video")
+
+        return cv2.imencode(".jpg", frame)[1].tobytes()
+
     @with_tqdm_logging
     def move(self, args: Namespace) -> None:
         self.logger.info("Moving images from %s to %s", args.path, args.output)
 
-        types = ["*.png", "*.jpeg", "*.jpg", "*.gif"]
-        files = list(chain(*[args.path.rglob(t) for t in types]))
+        types = ["*.png", "*.jpeg", "*.jpg", "*.gif", "*.mp4", "*.webm"]
+        files: list[Path] = list(chain(*[args.path.rglob(t) for t in types]))
 
         for file in tqdm(files):
-            prediction = self.client.predict(file, args.threshold)
+            if file.suffix in [".mp4", ".webm"]:
+                frame = self.extract_frame(file)
+                prediction = self.client.predict(BytesIO(frame), args.threshold)
+                prediction.image_path = file
+            else:
+                prediction = self.client.predict(file, args.threshold)
+
             dir_name = self._identify_new_dir_name(prediction.filtered_tags, self.tags)
 
             if not dir_name and not args.no_move_unknown:
