@@ -185,12 +185,11 @@ class Bot:
 
         media_group = []
         for index, item in enumerate(group):
+            photo = self.photo_or_raw(item)
             if index == 0:
-                input_ = InputMediaPhoto(
-                    media=self._get_or_create_thumbnail(item.path).read_bytes(), caption=f"ID: {id}\nPixiv: {pixiv_url}"
-                )
+                input_ = InputMediaPhoto(media=photo, caption=f"ID: {id}\nPixiv: {pixiv_url}")
             else:
-                input_ = InputMediaPhoto(media=self._get_or_create_thumbnail(item.path).read_bytes())
+                input_ = InputMediaPhoto(media=photo)
             media_group.append(input_)
 
         messages: list[Message] = []
@@ -273,10 +272,18 @@ class Bot:
         )
         return caption
 
-    def input_media_or_raw(self, media: Media, as_thumbnail: bool = True) -> PhotoSize | Video | BytesIO:
-        existing_media = media.get_tg_file_obj(media)
-        if existing_media:
-            return existing_media
+    def photo_or_raw(self, media: Media, as_thumbnail: bool = True) -> PhotoSize | BytesIO:
+        photo = media.get_tg_file_obj(media)
+        if isinstance(photo, PhotoSize):
+            return photo
+        if as_thumbnail:
+            return BytesIO(self._get_or_create_thumbnail(media.path).read_bytes())
+        return BytesIO(Path(media.path).read_bytes())
+
+    def video_or_raw(self, media: Media, as_thumbnail: bool = True) -> Video | BytesIO:
+        video = media.get_tg_file_obj(media)
+        if isinstance(video, Video):
+            return video
         if as_thumbnail:
             return BytesIO(self._get_or_create_thumbnail(media.path).read_bytes())
         return BytesIO(Path(media.path).read_bytes())
@@ -289,12 +296,12 @@ class Bot:
         buttons: InlineKeyboardMarkup | None = None,
         caption: str | None = None,
     ) -> Message:
-        video = self.input_media_or_raw(media, as_thumbnail=False)
+        video = self.video_or_raw(media)
         thumbnail = self._get_or_create_thumbnail(media.path) if isinstance(video, BytesIO) else None
 
         if update_message:
             input_media = InputMediaVideo(
-                media=video,  # type: ignore[arg-type]
+                media=video,
                 caption=caption,
                 parse_mode=ParseMode.HTML,
                 thumbnail=thumbnail,
@@ -302,7 +309,7 @@ class Bot:
             return await message.edit_media(media=input_media, reply_markup=buttons)  # type: ignore[return-value]
         else:
             return await message.reply_video(
-                video=video,  # type: ignore[arg-type]
+                video=video,
                 caption=caption,
                 reply_markup=buttons,
                 parse_mode=ParseMode.HTML,
@@ -319,14 +326,14 @@ class Bot:
     ) -> Message:
         if update_message:
             input_media = InputMediaPhoto(
-                media=self.input_media_or_raw(media),  # type: ignore[arg-type]
+                media=self.photo_or_raw(media),
                 caption=caption,
                 parse_mode=ParseMode.HTML,
             )
             return await message.edit_media(media=input_media, reply_markup=buttons)  # type: ignore[return-value]
         else:
             return await message.reply_photo(
-                photo=self.input_media_or_raw(media),  # type: ignore[arg-type]
+                photo=self.photo_or_raw(media),
                 caption=caption,
                 reply_markup=buttons,
                 parse_mode=ParseMode.HTML,
