@@ -232,7 +232,8 @@ class Bot:
                 await message.reply_text("No more images to process.")  # type: ignore[union-attr]
             return
 
-        if media.path.endswith((".mp4", ".webm")):
+        is_video = media.path.endswith((".mp4", ".webm"))
+        if is_video:
             raw_image = BytesIO(Path(media.path).read_bytes())
         else:
             raw_image = self._prepare_image(media.path)
@@ -254,14 +255,14 @@ class Bot:
 
         try:
             if is_update:
-                media_type = InputMediaVideo if media.path.endswith((".mp4", ".webm")) else InputMediaPhoto
+                media_type = InputMediaVideo if is_video else InputMediaPhoto
 
                 await message.edit_media(  # type: ignore[union-attr]
                     media=media_type(media=raw_image, caption=caption, parse_mode=ParseMode.HTML),
                     reply_markup=reply_markup,
                 )
             else:
-                if media.path.endswith((".mp4", ".webm")):
+                if is_video:
                     await message.reply_video(  # type: ignore[union-attr]
                         video=raw_image, caption=caption, reply_markup=reply_markup, parse_mode=ParseMode.HTML
                     )
