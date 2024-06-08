@@ -17,7 +17,6 @@ from telegram import (
     Document,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    InputMedia,
     InputMediaPhoto,
     InputMediaVideo,
     Message,
@@ -237,17 +236,31 @@ class Bot:
                 await message.reply_text("No more images to process.")  # type: ignore[union-attr]
             return
 
-        is_video = media.path.endswith((".mp4", ".webm"))
-        existing_media = media.get_tg_file_obj(message.get_bot())
-        if not existing_media:
-            raw_image = thumbnail = BytesIO(self._get_or_create_thumbnail(media.path).read_bytes())
-            if is_video:
-                raw_image = BytesIO(Path(media.path).read_bytes())
-
         self.logger.info("Current image: %s %s", media.path, media.sha256)
 
         reply_markup = self._buttons(media)
 
+        try:
+            send_func = self.send_video if media.path.endswith((".mp4", ".webm")) else self.send_photo
+            new_msg = await send_func(
+                media,
+                message,  # type: ignore[arg-type]
+                is_update and not force_new_message,
+                buttons=reply_markup,
+                caption=self.get_sort_caption(media),
+            )
+
+            if not media.tg_file_info and new_msg and (tg_file := new_msg.video or new_msg.photo[-1]):
+                media.tg_file_info = tg_file.to_dict()
+                media.save()
+
+        except BadRequest as e:
+            if "Image_process_failed" in str(e):
+                self.logger.error("Image processing failed for %s", media.path)
+                media.delete_instance()
+                await self._next_image(update)
+
+    def get_sort_caption(self, media: Media) -> str:
         categories = ", ".join([tag.name for tag in media.tags])
         processed_images = Media.select().where(Media._processed == True).count()  # noqa: E712
         total_images = Media.select().count()
@@ -258,59 +271,66 @@ class Bot:
             f"SHA256: <code>{media.sha256}</code>\n"
             f"Progress: {processed_images}/{total_images} {processed_images/total_images*100:.2f}%"
         )
+        return caption
 
-        try:
-            if is_update and not force_new_message:
-                media_type: InputMedia
+    def input_media_or_raw(self, media: Media, as_thumbnail: bool = True) -> PhotoSize | Video | BytesIO:
+        existing_media = media.get_tg_file_obj(media)
+        if existing_media:
+            return existing_media
+        if as_thumbnail:
+            return BytesIO(self._get_or_create_thumbnail(media.path).read_bytes())
+        return BytesIO(Path(media.path).read_bytes())
 
-                if is_video:
-                    media_type = InputMediaVideo(
-                        media=existing_media or raw_image,  # type: ignore[arg-type]
-                        caption=caption,
-                        parse_mode=ParseMode.HTML,
-                        thumbnail=None if existing_media else thumbnail,
-                    )
-                else:
-                    media_type = InputMediaPhoto(
-                        media=existing_media or raw_image,  # type: ignore[arg-type]
-                        caption=caption,
-                        parse_mode=ParseMode.HTML,
-                    )
+    async def send_video(
+        self,
+        media: Media,
+        message: Message,
+        update_message: bool,
+        buttons: InlineKeyboardMarkup | None = None,
+        caption: str | None = None,
+    ) -> Message:
+        video = self.input_media_or_raw(media, as_thumbnail=False)
+        thumbnail = self._get_or_create_thumbnail(media.path) if isinstance(video, BytesIO) else None
 
-                new_msg = await message.edit_media(media=media_type, reply_markup=reply_markup)  # type: ignore[union-attr]
-            else:
-                if is_video:
-                    new_msg = await message.reply_video(  # type: ignore[union-attr]
-                        video=existing_media or raw_image,
-                        caption=caption,
-                        reply_markup=reply_markup,
-                        parse_mode=ParseMode.HTML,
-                        thumbnail=None if existing_media else thumbnail,
-                    )
-                else:
-                    new_msg = await message.reply_photo(  # type: ignore[union-attr]
-                        photo=existing_media or raw_image,
-                        caption=caption,
-                        reply_markup=reply_markup,
-                        parse_mode=ParseMode.HTML,
-                    )
+        if update_message:
+            input_media = InputMediaVideo(
+                media=video,  # type: ignore[arg-type]
+                caption=caption,
+                parse_mode=ParseMode.HTML,
+                thumbnail=thumbnail,
+            )
+            return await message.edit_media(media=input_media, reply_markup=buttons)  # type: ignore[return-value]
+        else:
+            return await message.reply_video(
+                video=video,  # type: ignore[arg-type]
+                caption=caption,
+                reply_markup=buttons,
+                parse_mode=ParseMode.HTML,
+                thumbnail=thumbnail,
+            )
 
-            if (
-                not media.tg_file_info
-                and new_msg
-                and (tg_file := (new_msg.photo or new_msg.video or new_msg.animation))
-            ):
-                if isinstance(tg_file, list):
-                    tg_file = tg_file[-1]
-
-                media.tg_file_info = tg_file.to_dict()
-                media.save()
-
-        except BadRequest as e:
-            if "Image_process_failed" in str(e):
-                self.logger.error("Image processing failed for %s", media.path)
-                media.delete_instance()
-                await self._next_image(update)
+    async def send_photo(
+        self,
+        media: Media,
+        message: Message,
+        update_message: bool,
+        buttons: InlineKeyboardMarkup | None = None,
+        caption: str | None = None,
+    ) -> Message:
+        if update_message:
+            input_media = InputMediaPhoto(
+                media=self.input_media_or_raw(media),  # type: ignore[arg-type]
+                caption=caption,
+                parse_mode=ParseMode.HTML,
+            )
+            return await message.edit_media(media=input_media, reply_markup=buttons)  # type: ignore[return-value]
+        else:
+            return await message.reply_photo(
+                photo=self.input_media_or_raw(media),  # type: ignore[arg-type]
+                caption=caption,
+                reply_markup=buttons,
+                parse_mode=ParseMode.HTML,
+            )
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_user or not update.message:
