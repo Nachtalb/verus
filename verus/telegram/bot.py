@@ -90,9 +90,10 @@ class Indexer:
 class Bot:
     _intermediate_group_message: tuple[Message, ...] = ()
 
-    def __init__(self, authorized_user_id: int):
+    def __init__(self, authorized_user_id: int, image_dir: Path):
         self.logger = logging.getLogger(__name__)
         self.authorized_user_id = authorized_user_id
+        self.image_dir = image_dir
 
         self.toggle_mode: bool = False
         self.group_ask: bool = True
@@ -309,6 +310,33 @@ class Bot:
             parse_mode=ParseMode.MARKDOWN,
         )
 
+    async def refresh(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not update.effective_user or not update.message:
+            return
+
+        if update.effective_user.id != int(self.authorized_user_id):
+            await update.message.reply_text("Unauthorized access.")
+            return
+
+        await update.message.reply_text("Refreshing...this may take a while.")
+
+        total_images = Media.select().count()
+        total_tags = Tag.select().count()
+
+        indexer = Indexer(self.image_dir)
+        indexer.index()
+
+        new_total_images = Media.select().count()
+        new_total_tags = Tag.select().count()
+
+        self.tags = Tag.select()
+        await update.message.reply_text(
+            f"Refreshed.\n"
+            f"Images: `{total_images}` => `{new_total_images}`\n"
+            f"Tags: `{total_tags}` => `{new_total_tags}`",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+
     def _buttons(self, media: Media) -> InlineKeyboardMarkup:
         categories = chunk_iterable(
             [
@@ -490,12 +518,13 @@ def main() -> None:
     indexer = Indexer(args.dir)
     indexer.index()
 
-    bot = Bot(args.user)
+    bot = Bot(args.user, args.dir)
 
     persistence = PicklePersistence(filepath="verus_bot.dat")
     app = ApplicationBuilder().token(args.token).persistence(persistence).arbitrary_callback_data(True).build()
     app.add_handler(CommandHandler("start", bot.start))
     app.add_handler(CommandHandler("info", bot.info))
+    app.add_handler(CommandHandler("refresh", bot.refresh))
     app.add_handler(CallbackQueryHandler(bot.button))
 
     if hasattr(args, "webhook"):
