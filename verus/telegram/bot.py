@@ -9,7 +9,6 @@ from itertools import chain
 from pathlib import Path
 from typing import cast
 
-from PIL import Image
 from telegram import (
     CallbackQuery,
     InlineKeyboardButton,
@@ -24,8 +23,9 @@ from telegram.error import BadRequest
 from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, ContextTypes, PicklePersistence
 from tqdm import tqdm
 
+from verus.image import create_tg_thumbnail, create_tg_thumbnail_from_video
 from verus.telegram.db import DATABASE, History, Media, Tag, history_action, setup_db
-from verus.utils import chunk_iterable, resize_image_max_side_length, tqdm_logging_context
+from verus.utils import chunk_iterable, tqdm_logging_context
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
@@ -144,9 +144,11 @@ class Bot:
         media_group = []
         for index, item in enumerate(group):
             if index == 0:
-                input_ = InputMediaPhoto(media=self._prepare_image(item.path), caption=f"ID: {id}\nPixiv: {pixiv_url}")
+                input_ = InputMediaPhoto(
+                    media=self._get_or_create_thumbnail(item.path).read_bytes(), caption=f"ID: {id}\nPixiv: {pixiv_url}"
+                )
             else:
-                input_ = InputMediaPhoto(media=self._prepare_image(item.path))
+                input_ = InputMediaPhoto(media=self._get_or_create_thumbnail(item.path).read_bytes())
             media_group.append(input_)
 
         await query.answer("Sending media group...")
@@ -155,61 +157,19 @@ class Bot:
             messages.extend(await query.message.reply_media_group(list(chunk)))  # type: ignore[attr-defined]
         self._intermediate_group_message = tuple(messages)
 
-    def _prepare_image(self, image: Path | str) -> BytesIO:
-        self.logger.info("Preparing image: %s", image)
+    def _get_or_create_thumbnail(self, image: Path | str) -> Path:
         image = Path(image)
-        thumb = image.with_name(image.stem + ".thumb.jpg")
+        thumb_path = image.with_name(f"{image.stem}.thumb.jpg")
+        if not thumb_path.is_file():
+            if image.suffix in [".mp4", ".webm"]:
+                thumb = create_tg_thumbnail_from_video(image, 1024)
+            else:
+                thumb = create_tg_thumbnail(image, 1024)
 
-        if thumb.is_file():
-            self.logger.info("Using thumbnail %s", thumb)
-            return BytesIO(thumb.read_bytes())
+            thumb.save(thumb_path, format="JPEG", quality=70)
+            thumb.close()
 
-        pil_image = Image.open(image)
-        changed = False
-
-        # Convert image to JPEG to reduce size
-        if image.stat().st_size > MAX_IMAGE_BYTES:
-            changed = True
-
-        # Resize image if any side is longer than MAX_IMAGE_SIDE_LENGTH
-        if sum(pil_image.size) > MAX_IMAGE_SIDE_LENGTH:
-            pil_image = resize_image_max_side_length(pil_image, MAX_IMAGE_SIDE_LENGTH)
-            changed = True
-
-        #  Width and height ratio must be at most 20, crop center otherwise
-        if pil_image.width / pil_image.height > 20:
-            pil_image = pil_image.crop(
-                (
-                    pil_image.width // 2 - pil_image.height // 2,
-                    0,
-                    pil_image.width // 2 + pil_image.height // 2,
-                    pil_image.height,
-                )
-            )
-            changed = True
-        elif pil_image.height / pil_image.width > 20:
-            pil_image = pil_image.crop(
-                (
-                    0,
-                    pil_image.height // 2 - pil_image.width // 2,
-                    pil_image.width,
-                    pil_image.height // 2 + pil_image.width // 2,
-                )
-            )
-            changed = True
-
-        if changed:
-            bytes_ = BytesIO()
-            if pil_image.mode == "RGBA":
-                white = Image.new("RGB", pil_image.size, "WHITE")
-                white.paste(pil_image, (0, 0), pil_image)
-                pil_image = white
-            pil_image.save(bytes_, format="JPEG", quality=70)
-            bytes_.seek(0)
-            return bytes_
-
-        pil_image.close()
-        return BytesIO(image.read_bytes())
+        return thumb_path
 
     async def _next_image(self, update: Update) -> None:
         is_update = update.callback_query is not None
@@ -236,7 +196,7 @@ class Bot:
         if is_video:
             raw_image = BytesIO(Path(media.path).read_bytes())
         else:
-            raw_image = self._prepare_image(media.path)
+            raw_image = BytesIO(self._get_or_create_thumbnail(Path(media.path)).read_bytes())
 
         self.logger.info("Current image: %s %s", media.path, media.sha256)
 

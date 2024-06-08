@@ -1,6 +1,7 @@
 import json
 import logging
 from argparse import ArgumentParser, Namespace
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from io import BytesIO
 from itertools import chain
 from pathlib import Path
@@ -11,6 +12,7 @@ from tqdm import tqdm
 
 from verus.client import PredictClient
 from verus.filter import Node, parse_node
+from verus.image import create_tg_thumbnail, create_tg_thumbnail_from_video
 from verus.utils import with_tqdm_logging
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -69,12 +71,15 @@ class Verus:
 
         return cv2.imencode(".jpg", frame)[1].tobytes()
 
+    def get_files(self, path: Path) -> list[Path]:
+        types = ["*.png", "*.jpeg", "*.jpg", "*.gif", "*.mp4", "*.webm"]
+        return list(chain(*[path.rglob(t) for t in types]))
+
     @with_tqdm_logging
     def move(self, args: Namespace) -> None:
         self.logger.info("Moving images from %s to %s", args.path, args.output)
 
-        types = ["*.png", "*.jpeg", "*.jpg", "*.gif", "*.mp4", "*.webm"]
-        files: list[Path] = list(chain(*[args.path.rglob(t) for t in types]))
+        files = self.get_files(args.path)
 
         for file in tqdm(files):
             if file.suffix in [".mp4", ".webm"]:
@@ -103,6 +108,40 @@ class Verus:
             else:
                 self.logger.info(f"skipped \t{file.name}")
 
+    @staticmethod
+    def _create_thumbnail(file: Path) -> Path:
+        thumb_path = file.with_name(f"{file.stem}.thumb.jpg")
+        if thumb_path.is_file():
+            return thumb_path
+
+        if file.suffix in [".mp4", ".webm"]:
+            thumb = create_tg_thumbnail_from_video(file, 1024)
+        else:
+            thumb = create_tg_thumbnail(file, 1024)
+
+        thumb.save(thumb_path, format="JPEG", quality=70)
+        thumb.close()
+        return thumb_path
+
+    @with_tqdm_logging
+    def thumbs(self, args: Namespace) -> None:
+        self.logger.info("Generating thumbnails for images in %s", args.path)
+        files = set(self.get_files(args.path))
+
+        existing_thumbs = {f for f in files if "thumb" in f.stem}
+        filtered_files = files - existing_thumbs
+
+        with ProcessPoolExecutor() as executor:
+            futures = [executor.submit(Verus._create_thumbnail, image) for image in filtered_files]
+
+            pbar = tqdm(as_completed(futures), total=len(filtered_files))
+
+            for future in pbar:
+                try:
+                    future.result()
+                except Exception as e:
+                    self.logger.error(e)
+
 
 def main() -> None:
     parser = ArgumentParser(description="Verus - Image Tag Prediction and Organisation Tool")
@@ -112,6 +151,10 @@ def main() -> None:
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose logging.")
 
     sub_parsers = parser.add_subparsers()
+
+    thumbs_parser = sub_parsers.add_parser("thumbs", help="Generate thumbnails for images.")
+    thumbs_parser.add_argument("path", type=Path, help="Input folder containing PNG and JPEG images.")
+    thumbs_parser.set_defaults(func="thumbs")
 
     mv_parser = sub_parsers.add_parser("move", help="Move images based on their predicted tags.")
     mv_parser.add_argument("path", type=Path, help="Input folder containing PNG and JPEG images.")
