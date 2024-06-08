@@ -207,6 +207,7 @@ class Bot:
         image = Path(image)
         thumb_path = image.with_name(f"{image.stem}.thumb.jpg")
         if not thumb_path.is_file():
+            self.logger.info("Creating thumbnail for %s", image)
             if image.suffix in [".mp4", ".webm"]:
                 thumb = create_tg_thumbnail_from_video(image, 1024)
             else:
@@ -385,6 +386,11 @@ class Bot:
             parse_mode=ParseMode.MARKDOWN,
         )
 
+    def _bulk_create_thumbnails(self, medias: list[Media]) -> None:
+        with ProcessPoolExecutor() as executor:
+            self.logger.info("Creating thumbnails for %d images", len(medias))
+            list(executor.map(self._get_or_create_thumbnail, [media.path for media in medias]))
+
     async def refresh(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_user or not update.message:
             return
@@ -393,15 +399,21 @@ class Bot:
             await update.message.reply_text("Unauthorized access.")
             return
 
+        message_text = "Refreshing...this may take a while."
+        message = await update.message.reply_text(message_text)
+
         if self.import_folder:
             files = list(self.import_folder.rglob("*"))
-            await update.message.reply_text(f"Importing {len(files)} files...")
+            message_text += f"\nImporting {len(files)} files..."
+            await message.edit_text(message_text)
             for file in files:
                 new_path = self.upload_folder / file.name
                 file.rename(new_path)
-            await update.message.reply_text("Imported.")
+            message_text += "done."
+            await message.edit_text(message_text)
 
-        await update.message.reply_text("Refreshing...this may take a while.")
+        message_text += "\nIndexing..."
+        await message.edit_text(message_text)
 
         total_images = Media.select().count()
         total_tags = Tag.select().count()
@@ -412,13 +424,21 @@ class Bot:
         new_total_images = Media.select().count()
         new_total_tags = Tag.select().count()
 
-        self.tags = Tag.select()
-        await update.message.reply_text(
-            f"Refreshed.\n"
-            f"Images: `{total_images}` => `{new_total_images}`\n"
-            f"Tags: `{total_tags}` => `{new_total_tags}`",
-            parse_mode=ParseMode.MARKDOWN,
-        )
+        if total_images == new_total_images and total_tags == new_total_tags:
+            message_text += "done.\nNo new images or tags found."
+        else:
+            message_text += f"done.\n  Images: `{total_images}` => `{new_total_images}`\n  Tags: `{total_tags}` => `{new_total_tags}`"
+
+        new_images = Media.select().where(Media._processed == False)  # noqa: E712
+        if new_images:
+            message_text += "\nCreating thumbnails..."
+            await message.edit_text(message_text, parse_mode=ParseMode.MARKDOWN)
+
+            self._bulk_create_thumbnails(new_images)
+            message_text += "done."
+
+        message_text += "\nRefresh complete. Use /start to begin."
+        await message.edit_text(message_text, parse_mode=ParseMode.MARKDOWN)
 
     def _buttons(self, media: Media) -> InlineKeyboardMarkup:
         categories = chunk_iterable(
