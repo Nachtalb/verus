@@ -28,6 +28,7 @@ from telegram.ext import (
     CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
+    MessageHandler,
     PicklePersistence,
     filters,
 )
@@ -98,11 +99,11 @@ class Indexer:
 class Bot:
     _intermediate_group_message: tuple[Message, ...] = ()
 
-    def __init__(self, authorized_user_id: int, image_dir: Path, admin_user_id: int):
+    def __init__(self, authorized_user_id: int, image_dir: Path, upload_folder_name: str):
         self.logger = logging.getLogger(__name__)
         self.authorized_user_id = authorized_user_id
         self.image_dir = image_dir
-        self.admin_user_id = admin_user_id
+        self.upload_folder = image_dir / upload_folder_name
 
         self.toggle_mode: bool = False
         self.group_ask: bool = True
@@ -512,17 +513,49 @@ class Bot:
             ]
         )
 
-        await application.bot.send_message(self.admin_user_id, "Media Sorting Bot started.")
+        await application.bot.send_message(self.authorized_user_id, "Media Sorting Bot started.")
 
     async def post_stop(self, application: Application) -> None:  # type: ignore[type-arg]
         self.logger.info("Media Sorting Bot stopped.")
-        await application.bot.send_message(self.admin_user_id, "Media Sorting Bot stopped.")
+        await application.bot.send_message(self.authorized_user_id, "Media Sorting Bot stopped.")
+
+    async def receive_new_media(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not update.effective_user or not update.message:
+            return
+
+        if update.effective_user.id != int(self.authorized_user_id):
+            await update.message.reply_text("Unauthorized access.")
+            return
+
+        if update.message.photo:
+            media = await update.message.photo[-1].get_file()
+            media_path = self.upload_folder / f"{media.file_id}.jpg"
+        elif update.message.video:
+            media = await update.message.video.get_file()
+            media_path = self.upload_folder / f"{media.file_id}.mp4"
+        else:
+            return
+
+        progress_msg = await update.message.reply_text(
+            f"Receiving media `{media_path.name}`...", parse_mode=ParseMode.MARKDOWN
+        )
+        out = BytesIO()
+        await media.download_to_memory(out)
+
+        media_path.write_bytes(out.getvalue())
+
+        await progress_msg.delete()
+        await update.message.reply_text(
+            f"Media received `{media_path.name}`. Use /refresh then /start to process it.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
 
 
 def main() -> None:
     parser = ArgumentParser()
     parser.add_argument("--user", type=int, required=True)
     parser.add_argument("--dir", type=Path, required=True)
+    parser.add_argument("--upload-folder-name", type=str, default="misc")
     parser.add_argument("--token", required=True)
     parser.add_argument("--log", type=Path, default=Path("log.json"))
     parser.add_argument("--db", type=Path, default=Path("verus.db"))
@@ -543,7 +576,7 @@ def main() -> None:
     indexer = Indexer(args.dir)
     indexer.index()
 
-    bot = Bot(args.user, args.dir, args.user)
+    bot = Bot(args.user, args.dir, args.upload_folder_name)
 
     persistence = PicklePersistence(filepath="verus_bot.dat")
     app = (
@@ -562,6 +595,7 @@ def main() -> None:
     app.add_handler(CommandHandler("info", bot.info, filters=default_filter))
     app.add_handler(CommandHandler("refresh", bot.refresh, filters=default_filter))
     app.add_handler(CallbackQueryHandler(bot.button))
+    app.add_handler(MessageHandler(default_filter & (filters.PHOTO | filters.VIDEO), bot.receive_new_media))
 
     if hasattr(args, "webhook"):
         app.run_webhook(
