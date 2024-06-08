@@ -17,6 +17,7 @@ from telegram import (
     Document,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    InputMedia,
     InputMediaPhoto,
     InputMediaVideo,
     Message,
@@ -237,10 +238,9 @@ class Bot:
             return
 
         is_video = media.path.endswith((".mp4", ".webm"))
+        raw_image = thumbnail = BytesIO(self._get_or_create_thumbnail(media.path).read_bytes())
         if is_video:
             raw_image = BytesIO(Path(media.path).read_bytes())
-        else:
-            raw_image = BytesIO(self._get_or_create_thumbnail(Path(media.path)).read_bytes())
 
         self.logger.info("Current image: %s %s", media.path, media.sha256)
 
@@ -259,12 +259,16 @@ class Bot:
 
         try:
             if is_update and not force_new_message:
-                media_type = InputMediaVideo if is_video else InputMediaPhoto
+                media_type: InputMedia
 
-                await message.edit_media(  # type: ignore[union-attr]
-                    media=media_type(media=raw_image, caption=caption, parse_mode=ParseMode.HTML),
-                    reply_markup=reply_markup,
-                )
+                if is_video:
+                    media_type = InputMediaVideo(
+                        media=raw_image, caption=caption, parse_mode=ParseMode.HTML, thumbnail=thumbnail
+                    )
+                else:
+                    media_type = InputMediaPhoto(media=raw_image, caption=caption, parse_mode=ParseMode.HTML)
+
+                await message.edit_media(media=media_type, reply_markup=reply_markup)  # type: ignore[union-attr]
             else:
                 if is_video:
                     await message.reply_video(  # type: ignore[union-attr]
