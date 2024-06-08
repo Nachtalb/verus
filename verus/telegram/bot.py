@@ -312,18 +312,11 @@ class Bot:
         await self.send_media_group(group, query.message)  # type: ignore[arg-type]
 
         buttons = [
-            InlineKeyboardButton("Move", callback_data=("group_move", media.path, move_category)),
+            InlineKeyboardButton("Move", callback_data=(f"group_{action}", media.path, move_category)),
             InlineKeyboardButton(
-                "Move & Delete Last", callback_data=("group_move_except_last", media.path, move_category)
+                "Move & Delete Last", callback_data=(f"group_{action}_except_last", media.path, move_category)
             ),
-            InlineKeyboardButton(
-                "Cancel",
-                callback_data=(
-                    ("simple_move", media.path, move_category)
-                    if action == "move"
-                    else ("simple_continue", media.path, "")
-                ),
-            ),
+            InlineKeyboardButton("Cancel", callback_data=(f"simple_{action}", media.path, move_category)),
         ]
 
         tags = move_category if action == "move" else ", ".join([tag.name for tag in media.tags])
@@ -386,19 +379,20 @@ class Bot:
                 elif action == "undo":
                     self._undo(media)
             await self._clear_intermediate_group_message()
-        elif action in ["group_move", "group_continue", "group_move_except_last"]:
+        elif action.startswith("group_"):
             media = Media.get_or_none(Media.path == path)
+            tags = media.tags if "continue" in action else [Tag.get_or_create(category)]
 
             group = self.get_group(media)
             if query.message:
                 await query.message.delete()  # type: ignore[attr-defined]
                 force_new = True
 
-            if action == "group_move_except_last" and len(group) > 1:
+            if "except_last" in action and len(group) > 1:
                 self._move(group[-1], "delete")
                 group = group[:-1]
 
-            self._group_set_tags(group, media.tags if action == "group_continue" else [Tag.get_or_create(category)])
+            self._group_set_tags(group, tags)
             await self._clear_intermediate_group_message()
         elif action == "toggle":
             media = Media.get_or_none(Media.path == path)
