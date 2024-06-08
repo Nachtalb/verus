@@ -12,13 +12,17 @@ from typing import cast
 
 from tabulate import tabulate
 from telegram import (
+    Animation,
     CallbackQuery,
+    Document,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     InputMediaPhoto,
     InputMediaVideo,
     Message,
+    PhotoSize,
     Update,
+    Video,
 )
 from telegram.constants import ParseMode
 from telegram.error import BadRequest
@@ -527,19 +531,47 @@ class Bot:
             await update.message.reply_text("Unauthorized access.")
             return
 
+        obj: PhotoSize | Video | Document | Animation | None
         if update.message.photo:
-            media = await update.message.photo[-1].get_file()
-            media_path = self.upload_folder / f"{media.file_id}.jpg"
-        elif update.message.video:
-            if not update.message.video.file_size:
-                await update.message.reply_text("Video file size is not available.")
-                return
-            if update.message.video.file_size > TG_MAX_DOWNLOAD_SIZE:
-                await update.message.reply_text("Video is too large. Max size is 20 MB.")
-                return
-            media = await update.message.video.get_file()
-            media_path = self.upload_folder / f"{media.file_id}.mp4"
+            obj = update.message.photo[-1]
         else:
+            obj = update.message.video or update.message.document or update.message.animation
+
+        if not obj:
+            return
+
+        if not obj.file_size:
+            await update.message.reply_text("File size is not available.")
+            return
+        elif obj.file_size > TG_MAX_DOWNLOAD_SIZE:
+            await update.message.reply_text("File is too large. Max size is 20 MB.")
+            return
+
+        media = await obj.get_file()
+        if not media.file_path:
+            await update.message.reply_text("Can't determine file extension.")
+            return
+
+        ext = Path(media.file_path).suffix
+        if ext not in [".jpg", ".jpeg", ".png", ".mp4", ".webm"]:
+            await update.message.reply_text("Unsupported file type.")
+            return
+
+        media_path = self.upload_folder / f"{media.file_id}{ext}"
+
+        if media_path.exists():
+            existing_media: Media | None = Media.get_or_none(Media.path == str(media_path))
+            if existing_media and existing_media.processed:
+                await update.message.reply_text(
+                    f"Media already exists `{media_path.name}` and is processed.",
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+                return
+
+            await update.message.reply_text(
+                f"Media already exists `{media_path.name}`. Use /refresh then /start to process it.",
+                parse_mode=ParseMode.MARKDOWN,
+            )
             return
 
         progress_msg = await update.message.reply_text(
@@ -616,7 +648,13 @@ def main() -> None:
     app.add_handler(CommandHandler("refresh", bot.refresh, filters=default_filter))
     app.add_handler(CommandHandler("undo", bot.undo, filters=default_filter))
     app.add_handler(CallbackQueryHandler(bot.button))
-    app.add_handler(MessageHandler(default_filter & (filters.PHOTO | filters.VIDEO), bot.receive_new_media))
+    app.add_handler(
+        MessageHandler(
+            default_filter
+            & (filters.PHOTO | filters.VIDEO | filters.Document.IMAGE | filters.Document.VIDEO | filters.ANIMATION),
+            bot.receive_new_media,
+        )
+    )
 
     if hasattr(args, "webhook"):
         app.run_webhook(
