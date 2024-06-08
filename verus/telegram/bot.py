@@ -25,7 +25,7 @@ from tqdm import tqdm
 
 from verus.image import create_tg_thumbnail, create_tg_thumbnail_from_video
 from verus.telegram.db import DATABASE, History, Media, Tag, history_action, setup_db
-from verus.utils import chunk_iterable, tqdm_logging_context
+from verus.utils import bool_emoji, chunk_iterable, tqdm_logging_context
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
@@ -93,6 +93,7 @@ class Bot:
         self.authorized_user_id = authorized_user_id
 
         self.toggle_mode: bool = False
+        self.group_ask: bool = True
         self.tags = Tag.select()
 
     def _undo(self, media: Media) -> None:
@@ -280,6 +281,9 @@ class Bot:
                 InlineKeyboardButton(
                     "Mode: " + ("Toggle" if self.toggle_mode else "Move"), callback_data=("toggle_mode", "", "")
                 ),
+                InlineKeyboardButton(
+                    "Group: " + bool_emoji(self.group_ask), callback_data=("toggle_group", media.path, "")
+                ),
                 InlineKeyboardButton("More", callback_data=("more", media.path, "")),
             ],
         ]
@@ -338,6 +342,9 @@ class Bot:
         force_new = False
 
         initial_action = action
+        if action in ["continue", "move"] and not self.group_ask:
+            action = "simple_" + action
+
         if action in ["continue", "move"]:
             media = Media.get_or_none(Media.path == path)
 
@@ -360,6 +367,9 @@ class Bot:
             if initial_action.startswith("simple_") and query.message:
                 await query.message.delete()  # type: ignore[attr-defined]
                 force_new = True
+
+                self.group_ask = False
+                await query.answer("Turned off group ask.")
 
             with DATABASE.atomic():
                 if action == "simple_continue":
@@ -392,8 +402,12 @@ class Bot:
                 await query.answer("No group found.")
             else:
                 await self.send_media_group(group, query.message)  # type: ignore[arg-type]
+        elif action == "toggle_group":
+            self.group_ask = not self.group_ask
+            await query.answer(f"Group Ask: {bool_emoji(self.group_ask)}")
         elif action == "toggle_mode":
             self.toggle_mode = not self.toggle_mode
+            await query.answer(f"Current Mode: {'Toggle' if self.toggle_mode else 'Move'}")
         else:
             self.logger.error(f"Unknown action: {action}")
             await query.answer()

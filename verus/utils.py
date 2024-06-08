@@ -10,6 +10,10 @@ from tqdm import tqdm
 T = TypeVar("T")
 
 
+def bool_emoji(value: bool) -> str:
+    return "✅" if value else "❌"
+
+
 def receive_all(sock: socket.socket, buffer_size: int = 4096) -> bytes:
     data = b""
     while True:
