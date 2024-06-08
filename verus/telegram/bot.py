@@ -509,6 +509,7 @@ class Bot:
                 ("start", "Start the sorting"),
                 ("info", "Show information about the bot"),
                 ("refresh", "Refresh the database"),
+                ("undo", "Undo the last action"),
             ]
         )
 
@@ -555,6 +556,20 @@ class Bot:
             parse_mode=ParseMode.MARKDOWN,
         )
 
+    async def undo(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not update.effective_user or not update.message:
+            return
+
+        last_action = History.latest_action()
+        if last_action:
+            self._undo(last_action.media)
+            await update.message.reply_text(
+                f"Last action undone. `{last_action.action}` on `{Path(last_action.media.path).name}`",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+        else:
+            await update.message.reply_text("No action to undo.")
+
 
 def main() -> None:
     parser = ArgumentParser()
@@ -599,6 +614,7 @@ def main() -> None:
     app.add_handler(CommandHandler("start", bot.start, filters=default_filter))
     app.add_handler(CommandHandler("info", bot.info, filters=default_filter))
     app.add_handler(CommandHandler("refresh", bot.refresh, filters=default_filter))
+    app.add_handler(CommandHandler("undo", bot.undo, filters=default_filter))
     app.add_handler(CallbackQueryHandler(bot.button))
     app.add_handler(MessageHandler(default_filter & (filters.PHOTO | filters.VIDEO), bot.receive_new_media))
 
