@@ -86,7 +86,7 @@ class Indexer:
 
 
 class Bot:
-    _intermediate_group_message: None | tuple[Message, ...] = None
+    _intermediate_group_message: tuple[Message, ...] = ()
 
     def __init__(self, authorized_user_id: int):
         self.logger = logging.getLogger(__name__)
@@ -142,17 +142,8 @@ class Bot:
         group = sorted(group, key=lambda item: Path(item.path).name)
         return group  # type: ignore[no-any-return]
 
-    async def send_media_group(self, media: Media, query: CallbackQuery) -> None:
-        if not query.message:
-            # something went wrong
-            return
-
-        group = self.get_group(media)
-
-        if media.path.endswith((".mp4", ".webm")) or not group:
-            await query.answer("Has no group")
-            return
-
+    async def send_media_group(self, group: list[Media], message: Message) -> None:
+        id = self.extract_id(group[0].path)
         pixiv_url = f"https://www.pixiv.net/artworks/{id}"
 
         media_group = []
@@ -165,10 +156,9 @@ class Bot:
                 input_ = InputMediaPhoto(media=self._get_or_create_thumbnail(item.path).read_bytes())
             media_group.append(input_)
 
-        await query.answer("Sending media group...")
-        messages = []
+        messages: list[Message] = []
         for chunk in chunk_iterable(media_group, 10):
-            messages.extend(await query.message.reply_media_group(list(chunk)))  # type: ignore[attr-defined]
+            messages.extend(await message.reply_media_group(list(chunk)))
         self._intermediate_group_message = tuple(messages)
 
     def _get_or_create_thumbnail(self, image: Path | str) -> Path:
@@ -185,7 +175,7 @@ class Bot:
 
         return thumb_path
 
-    async def _next_image(self, update: Update) -> None:
+    async def _next_image(self, update: Update, force_new_message: bool = False) -> None:
         is_update = update.callback_query is not None
 
         message = update.callback_query.message if is_update else update.message  # type: ignore[union-attr]
@@ -228,7 +218,7 @@ class Bot:
         )
 
         try:
-            if is_update:
+            if is_update and not force_new_message:
                 media_type = InputMediaVideo if is_video else InputMediaPhoto
 
                 await message.edit_media(  # type: ignore[union-attr]
@@ -288,6 +278,31 @@ class Bot:
 
         return InlineKeyboardMarkup(buttons)
 
+    async def _clear_intermediate_group_message(self) -> None:
+        for message in self._intermediate_group_message:
+            await message.delete()
+        self._intermediate_group_message = ()
+
+    async def ask_for_group_action(self, media: Media, category: str, query: CallbackQuery) -> None:
+        group = self.get_group(media)
+
+        if not group or not query.message:
+            # something went wrong
+            return
+
+        await self.send_media_group(group, query.message)  # type: ignore[arg-type]
+
+        buttons = [
+            InlineKeyboardButton("Move", callback_data=("group_move", media.path, category)),
+            InlineKeyboardButton("Cancel", callback_data=("simple_move", media.path, category)),
+        ]
+
+        await query.message.reply_text(  # type: ignore[attr-defined]
+            f"Do you want to move the whole group to `{category}`",
+            reply_markup=InlineKeyboardMarkup([buttons]),
+            parse_mode=ParseMode.MARKDOWN,
+        )
+
     async def button(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
         if not query or not query.data:
@@ -300,26 +315,56 @@ class Bot:
             await query.message.delete()  # type: ignore[union-attr]
             return
 
-        if action in ["continue", "move", "toggle", "undo"]:
+        force_new = False
+
+        if action in ["continue", "move", "toggle", "undo", "group_move", "simple_move"]:
             media = Media.get_or_none(Media.path == path)
+
+            initial_action = "move"
+            if action == "move":
+                group = self.get_group(media)
+                if not group:
+                    action = "simple_move"
+                else:
+                    await self._clear_intermediate_group_message()
+                    await self.ask_for_group_action(media, category, query)
+
+                    await query.answer()
+
+                    if query.message:
+                        await query.message.delete()  # type: ignore[attr-defined]
+                    context.drop_callback_data(query)
+                    return
 
             with DATABASE.atomic():
                 if action == "continue":
                     self._continue(media)
-                elif action == "move":
+                elif action == "simple_move":
+                    if initial_action == "simple_move" and query.message:
+                        await query.message.delete()  # type: ignore[attr-defined]
+                        force_new = True
                     self._move(media, category)
+                elif action == "group_move":
+                    group = self.get_group(media)
+                    for item in group:
+                        self._move(item, category)
+                    if query.message:
+                        await query.message.delete()  # type: ignore[attr-defined]
+                        force_new = True
                 elif action == "toggle":
                     self._toggle(media, category)
                 elif action == "undo":
                     self._undo(media)
 
-                if action in ["move", "continue", "undo"] and self._intermediate_group_message:
-                    for message in self._intermediate_group_message:
-                        await message.delete()
-                    self._intermediate_group_message = None
+                if action in ["simple_move", "continue", "undo", "group_move"]:
+                    await self._clear_intermediate_group_message()
         elif action == "more":
             media = Media.get_or_none(Media.path == path)
-            await self.send_media_group(media, query)
+            group = self.get_group(media)
+            if not group or not query.message:
+                await query.answer("No group found.")
+            else:
+                await self.send_media_group(group, query.message)  # type: ignore[arg-type]
         elif action == "toggle_mode":
             self.toggle_mode = not self.toggle_mode
         else:
@@ -329,7 +374,7 @@ class Bot:
         await query.answer()
 
         context.drop_callback_data(query)
-        await self._next_image(update)
+        await self._next_image(update, force_new)
 
 
 def main() -> None:
