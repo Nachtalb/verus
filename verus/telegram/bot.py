@@ -5,6 +5,7 @@ import re
 from argparse import ArgumentParser
 from concurrent.futures import ProcessPoolExecutor
 from contextlib import nullcontext
+from functools import partial
 from io import BytesIO
 from itertools import chain
 from pathlib import Path
@@ -38,13 +39,14 @@ from telegram.ext import (
 )
 from tqdm import tqdm
 
-from verus.image import create_tg_thumbnail, create_tg_thumbnail_from_video
+from verus.image import create_and_save_tg_thumbnail
 from verus.telegram.db import DATABASE, History, Media, MediaTag, Tag, history_action, setup_db
 from verus.utils import bool_emoji, chunk_iterable, tqdm_logging_context
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
 TG_MAX_DOWNLOAD_SIZE = 20_000_000
+MAX_THUMBNAIL_SIZE = 1024
 
 
 class Indexer:
@@ -203,21 +205,6 @@ class Bot:
 
         self._intermediate_group_message = tuple(messages)
 
-    def _get_or_create_thumbnail(self, image: Path | str) -> Path:
-        image = Path(image)
-        thumb_path = image.with_name(f"{image.stem}.thumb.jpg")
-        if not thumb_path.is_file():
-            self.logger.info("Creating thumbnail for %s", image)
-            if image.suffix in [".mp4", ".webm"]:
-                thumb = create_tg_thumbnail_from_video(image, 1024)
-            else:
-                thumb = create_tg_thumbnail(image, 1024)
-
-            thumb.save(thumb_path, format="JPEG", quality=70)
-            thumb.close()
-
-        return thumb_path
-
     async def _next_image(self, update: Update, force_new_message: bool = False) -> None:
         is_update = update.callback_query is not None
 
@@ -281,7 +268,7 @@ class Bot:
         if isinstance(photo, PhotoSize):
             return photo
         if as_thumbnail:
-            return BytesIO(self._get_or_create_thumbnail(media.path).read_bytes())
+            return BytesIO(create_and_save_tg_thumbnail(media.path, MAX_THUMBNAIL_SIZE).read_bytes())
         return BytesIO(Path(media.path).read_bytes())
 
     def video_or_raw(self, media: Media, as_thumbnail: bool = True) -> Video | BytesIO:
@@ -289,7 +276,7 @@ class Bot:
         if isinstance(video, Video):
             return video
         if as_thumbnail:
-            return BytesIO(self._get_or_create_thumbnail(media.path).read_bytes())
+            return BytesIO(create_and_save_tg_thumbnail(media.path, MAX_THUMBNAIL_SIZE).read_bytes())
         return BytesIO(Path(media.path).read_bytes())
 
     async def send_video(
@@ -301,7 +288,7 @@ class Bot:
         caption: str | None = None,
     ) -> Message:
         video = self.video_or_raw(media)
-        thumbnail = self._get_or_create_thumbnail(media.path) if isinstance(video, BytesIO) else None
+        thumbnail = create_and_save_tg_thumbnail(media.path, MAX_THUMBNAIL_SIZE) if isinstance(video, BytesIO) else None
 
         if update_message:
             input_media = InputMediaVideo(
@@ -389,7 +376,12 @@ class Bot:
     def _bulk_create_thumbnails(self, medias: list[Media]) -> None:
         with ProcessPoolExecutor() as executor:
             self.logger.info("Creating thumbnails for %d images", len(medias))
-            list(executor.map(self._get_or_create_thumbnail, [media.path for media in medias]))
+            futures = [
+                executor.submit(create_and_save_tg_thumbnail, media.path, MAX_THUMBNAIL_SIZE) for media in medias
+            ]
+
+            for future in tqdm(futures, desc="Creating thumbnails", total=len(medias)):
+                future.result()
 
     async def refresh(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_user or not update.message:

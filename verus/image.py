@@ -65,6 +65,31 @@ def create_tg_thumbnail(image: ImageLike, max_side_length: int = -1) -> Image.Im
     return image
 
 
+def create_and_save_tg_thumbnail(image: Path, max_side_length: int = -1, output_path: Path | None = None) -> Path:
+    """Create and save a Telegram compatible thumbnail.
+
+    Args:
+        image (Path): Image to convert
+        max_side_length (int): Maximum side length, defaults to -1 == no resizing
+        output_path (Path): Output path, defaults to None == same directory as image
+
+    Returns:
+        Path: Path to the thumbnail
+    """
+    image = Path(image)
+    thumb_path = output_path or image.with_name(f"{image.stem}.thumb.jpg")
+    if not thumb_path.is_file():
+        if image.suffix in [".mp4", ".webm"]:
+            thumb = create_tg_thumbnail_from_video(image, max_side_length)
+        else:
+            thumb = create_tg_thumbnail(image, max_side_length)
+
+        thumb.save(thumb_path, format="JPEG", quality=70)
+        thumb.close()
+
+    return thumb_path
+
+
 def flatten_image(image: ImageLike) -> Image.Image:
     """Flatten image if it has an alpha channel.
 
