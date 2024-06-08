@@ -129,18 +129,32 @@ class Bot:
         match = re.search(r"_(\d+)_p\d+\.", filename)
         return match.group(1) if match else None
 
+    def get_group(self, media: Media) -> list[Media]:
+        if not media:
+            return []
+
+        id = self.extract_id(media.path)
+
+        if not id:
+            return []
+
+        group = Media.select().where(Media.path.contains(id))
+        group = sorted(group, key=lambda item: Path(item.path).name)
+        return group  # type: ignore[no-any-return]
+
     async def send_media_group(self, media: Media, query: CallbackQuery) -> None:
         if not query.message:
             # something went wrong
             return
-        id = self.extract_id(media.path)
-        if media.path.endswith((".mp4", ".webm")) or not id:
+
+        group = self.get_group(media)
+
+        if media.path.endswith((".mp4", ".webm")) or not group:
             await query.answer("Has no group")
             return
 
         pixiv_url = f"https://www.pixiv.net/artworks/{id}"
 
-        group = Media.select().where(Media.path.contains(id)).order_by(Media.path)
         media_group = []
         for index, item in enumerate(group):
             if index == 0:
