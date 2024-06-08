@@ -141,7 +141,7 @@ class Bot:
         match = re.search(r"_(\d+)_p\d+\.", filename)
         return match.group(1) if match else None
 
-    def get_group(self, media: Media) -> list[Media]:
+    def get_group(self, media: Media, non_processed_only: bool = True) -> list[Media]:
         if not media:
             return []
 
@@ -151,6 +151,10 @@ class Bot:
             return []
 
         group = Media.select().where(Media.path.contains(id))
+
+        if non_processed_only:
+            group = group.where(Media._processed == False)  # noqa: E712
+
         group = sorted(group, key=lambda item: Path(item.path).name)
         return group  # type: ignore[no-any-return]
 
@@ -397,7 +401,7 @@ class Bot:
                     self._toggle(media, category)
         elif action == "more":
             media = Media.get_or_none(Media.path == path)
-            group = self.get_group(media)
+            group = self.get_group(media, non_processed_only=False)
             if not group or not query.message:
                 await query.answer("No group found.")
             else:
