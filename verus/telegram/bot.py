@@ -109,6 +109,17 @@ class Bot:
             media.processed = True
             media.save()
 
+    def _group_set_tags(self, group: list[Media], tags: list[Tag], fill_history: bool = True) -> None:
+        id = self.extract_id(group[0].path)
+        self.logger.info("Group move: %s to %s", id, ", ".join([tag.name for tag in tags]))
+
+        for item in group:
+            with history_action(item, action="group_move") if fill_history else nullcontext():
+                item.tags.clear()
+                item.tags.add(tags)
+                item.processed = True
+                item.save()
+
     def _toggle(self, media: Media, to_tag: str | Tag, fill_history: bool = True) -> None:
         self.logger.info("Toggle: %s, %s", media.path, to_tag)
 
@@ -283,7 +294,7 @@ class Bot:
             await message.delete()
         self._intermediate_group_message = ()
 
-    async def ask_for_group_action(self, media: Media, category: str, query: CallbackQuery) -> None:
+    async def ask_for_group_action(self, media: Media, action: str, move_category: str, query: CallbackQuery) -> None:
         group = self.get_group(media)
 
         if not group or not query.message:
@@ -293,12 +304,21 @@ class Bot:
         await self.send_media_group(group, query.message)  # type: ignore[arg-type]
 
         buttons = [
-            InlineKeyboardButton("Move", callback_data=("group_move", media.path, category)),
-            InlineKeyboardButton("Cancel", callback_data=("simple_move", media.path, category)),
+            InlineKeyboardButton("Move", callback_data=("group_move", media.path, "")),
+            InlineKeyboardButton(
+                "Cancel",
+                callback_data=(
+                    ("simple_move", media.path, move_category)
+                    if action == "move"
+                    else ("simple_continue", media.path, "")
+                ),
+            ),
         ]
 
+        tags = move_category if action == "move" else ", ".join([tag.name for tag in media.tags])
+
         await query.message.reply_text(  # type: ignore[attr-defined]
-            f"Do you want to move the whole group to `{category}`",
+            f"Do you want to move the group to these tags?: {tags}",
             reply_markup=InlineKeyboardMarkup([buttons]),
             parse_mode=ParseMode.MARKDOWN,
         )
@@ -317,47 +337,54 @@ class Bot:
 
         force_new = False
 
-        if action in ["continue", "move", "toggle", "undo", "group_move", "simple_move"]:
+        initial_action = action
+        if action in ["continue", "move"]:
             media = Media.get_or_none(Media.path == path)
 
-            initial_action = "move"
-            if action == "move":
-                group = self.get_group(media)
-                if not group:
-                    action = "simple_move"
-                else:
-                    await self._clear_intermediate_group_message()
-                    await self.ask_for_group_action(media, category, query)
+            group = self.get_group(media)
 
-                    await query.answer()
+            if not group:
+                action = "simple_move" if initial_action == "move" else "simple_continue"
+            else:
+                await self._clear_intermediate_group_message()
+                await self.ask_for_group_action(media, action, category, query)
+                await query.answer()
+                if query.message:
+                    await query.message.delete()  # type: ignore[attr-defined]
+                context.drop_callback_data(query)
+                return
 
-                    if query.message:
-                        await query.message.delete()  # type: ignore[attr-defined]
-                    context.drop_callback_data(query)
-                    return
+        if action in ["undo", "simple_continue", "simple_move"]:
+            media = Media.get_or_none(Media.path == path)
+
+            if initial_action.startswith("simple_") and query.message:
+                await query.message.delete()  # type: ignore[attr-defined]
+                force_new = True
 
             with DATABASE.atomic():
-                if action == "continue":
+                if action == "simple_continue":
                     self._continue(media)
                 elif action == "simple_move":
-                    if initial_action == "simple_move" and query.message:
-                        await query.message.delete()  # type: ignore[attr-defined]
-                        force_new = True
                     self._move(media, category)
-                elif action == "group_move":
-                    group = self.get_group(media)
-                    for item in group:
-                        self._move(item, category)
-                    if query.message:
-                        await query.message.delete()  # type: ignore[attr-defined]
-                        force_new = True
-                elif action == "toggle":
-                    self._toggle(media, category)
                 elif action == "undo":
                     self._undo(media)
+            await self._clear_intermediate_group_message()
+        elif action in ["group_move", "group_continue"]:
+            media = Media.get_or_none(Media.path == path)
 
-                if action in ["simple_move", "continue", "undo", "group_move"]:
-                    await self._clear_intermediate_group_message()
+            group = self.get_group(media)
+            if query.message:
+                await query.message.delete()  # type: ignore[attr-defined]
+                force_new = True
+
+            self._group_set_tags(group, media.tags)
+            await self._clear_intermediate_group_message()
+        elif action == "toggle":
+            media = Media.get_or_none(Media.path == path)
+
+            with DATABASE.atomic():
+                if action == "toggle":
+                    self._toggle(media, category)
         elif action == "more":
             media = Media.get_or_none(Media.path == path)
             group = self.get_group(media)
