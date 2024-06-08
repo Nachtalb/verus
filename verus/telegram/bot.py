@@ -22,7 +22,15 @@ from telegram import (
 )
 from telegram.constants import ParseMode
 from telegram.error import BadRequest
-from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, ContextTypes, PicklePersistence
+from telegram.ext import (
+    Application,
+    ApplicationBuilder,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    PicklePersistence,
+    filters,
+)
 from tqdm import tqdm
 
 from verus.image import create_tg_thumbnail, create_tg_thumbnail_from_video
@@ -90,10 +98,11 @@ class Indexer:
 class Bot:
     _intermediate_group_message: tuple[Message, ...] = ()
 
-    def __init__(self, authorized_user_id: int, image_dir: Path):
+    def __init__(self, authorized_user_id: int, image_dir: Path, admin_user_id: int):
         self.logger = logging.getLogger(__name__)
         self.authorized_user_id = authorized_user_id
         self.image_dir = image_dir
+        self.admin_user_id = admin_user_id
 
         self.toggle_mode: bool = False
         self.group_ask: bool = True
@@ -493,6 +502,22 @@ class Bot:
         context.drop_callback_data(query)
         await self._next_image(update, force_new)
 
+    async def post_init(self, application: Application) -> None:  # type: ignore[type-arg]
+        self.logger.info("Media Sorting Bot started.")
+        await application.bot.set_my_commands(
+            [
+                ("start", "Start the sorting"),
+                ("info", "Show information about the bot"),
+                ("refresh", "Refresh the database"),
+            ]
+        )
+
+        await application.bot.send_message(self.admin_user_id, "Media Sorting Bot started.")
+
+    async def post_stop(self, application: Application) -> None:  # type: ignore[type-arg]
+        self.logger.info("Media Sorting Bot stopped.")
+        await application.bot.send_message(self.admin_user_id, "Media Sorting Bot stopped.")
+
 
 def main() -> None:
     parser = ArgumentParser()
@@ -518,13 +543,24 @@ def main() -> None:
     indexer = Indexer(args.dir)
     indexer.index()
 
-    bot = Bot(args.user, args.dir)
+    bot = Bot(args.user, args.dir, args.user)
 
     persistence = PicklePersistence(filepath="verus_bot.dat")
-    app = ApplicationBuilder().token(args.token).persistence(persistence).arbitrary_callback_data(True).build()
-    app.add_handler(CommandHandler("start", bot.start))
-    app.add_handler(CommandHandler("info", bot.info))
-    app.add_handler(CommandHandler("refresh", bot.refresh))
+    app = (
+        ApplicationBuilder()
+        .token(args.token)
+        .persistence(persistence)
+        .arbitrary_callback_data(True)
+        .post_init(bot.post_init)
+        .post_stop(bot.post_stop)
+        .build()
+    )
+
+    default_filter = filters.ChatType.PRIVATE & filters.User(args.user)
+
+    app.add_handler(CommandHandler("start", bot.start, filters=default_filter))
+    app.add_handler(CommandHandler("info", bot.info, filters=default_filter))
+    app.add_handler(CommandHandler("refresh", bot.refresh, filters=default_filter))
     app.add_handler(CallbackQueryHandler(bot.button))
 
     if hasattr(args, "webhook"):
