@@ -102,11 +102,14 @@ class Indexer:
 class Bot:
     _intermediate_group_message: tuple[Message, ...] = ()
 
-    def __init__(self, authorized_user_id: int, image_dir: Path, upload_folder_name: str):
+    def __init__(
+        self, authorized_user_id: int, image_dir: Path, upload_folder_name: str, import_folder: Path | None = None
+    ):
         self.logger = logging.getLogger(__name__)
         self.authorized_user_id = authorized_user_id
         self.image_dir = image_dir
         self.upload_folder = image_dir / upload_folder_name
+        self.import_folder = import_folder
 
         self.toggle_mode: bool = False
         self.group_ask: bool = True
@@ -390,6 +393,14 @@ class Bot:
             await update.message.reply_text("Unauthorized access.")
             return
 
+        if self.import_folder:
+            files = list(self.import_folder.rglob("*"))
+            await update.message.reply_text(f"Importing {len(files)} files...")
+            for file in files:
+                new_path = self.upload_folder / file.name
+                file.rename(new_path)
+            await update.message.reply_text("Imported.")
+
         await update.message.reply_text("Refreshing...this may take a while.")
 
         total_images = Media.select().count()
@@ -667,6 +678,7 @@ def main() -> None:
     parser.add_argument("--user", type=int, required=True)
     parser.add_argument("--dir", type=Path, required=True)
     parser.add_argument("--upload-folder-name", type=str, default="misc")
+    parser.add_argument("--import-folder", type=Path, default=Path())
     parser.add_argument("--token", required=True)
     parser.add_argument("--log", type=Path, default=Path("log.json"))
     parser.add_argument("--db", type=Path, default=Path("verus.db"))
@@ -687,7 +699,9 @@ def main() -> None:
     indexer = Indexer(args.dir)
     indexer.index()
 
-    bot = Bot(args.user, args.dir, args.upload_folder_name)
+    import_folder = args.import_folder if Path() != args.import_folder else None
+
+    bot = Bot(args.user, args.dir, args.upload_folder_name, import_folder)
 
     persistence = PicklePersistence(filepath="verus_bot.dat")
     app = (
