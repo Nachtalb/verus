@@ -12,6 +12,7 @@ from peewee import (
     Model,
     Query,
     SqliteDatabase,
+    fn,
 )
 from playhouse.shortcuts import dict_to_model, model_to_dict
 from playhouse.sqlite_ext import JSONField
@@ -77,7 +78,12 @@ class Media(BaseModel):
 
     @staticmethod
     def unprocessed() -> Query:
-        return Media.select().order_by(Media.path).where(Media._processed == False)  # noqa: E712
+        """Return all unprocessed media sorted by name."""
+        return (
+            Media.select()
+            .where(Media._processed == False)  # noqa: E712
+            .order_by(fn.substr(Media.path, fn.length(Media.path) - fn.length(fn.replace(Media.path, "/", "")) + 1))
+        )
 
     @staticmethod
     def get_or_create(
