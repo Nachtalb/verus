@@ -114,10 +114,15 @@ class Bot:
         id = self.extract_id(group[0].path)
         self.logger.info("Group move: %s to %s", id, ", ".join([tag.name for tag in tags]))
 
+        if not tags:
+            raise ValueError("No tags provided")
+            return
+
         for item in group:
             with history_action(item, action="group_move") if fill_history else nullcontext():
                 item.tags.clear()
-                item.tags.add(tags)
+                for tag in tags:
+                    item.tags.add(tag)
                 item.processed = True
                 item.save()
 
@@ -173,7 +178,7 @@ class Bot:
             media_group.append(input_)
 
         messages: list[Message] = []
-        for chunk in chunk_iterable(media_group, 10):
+        for chunk in chunk_iterable(media_group[:20], 10):
             messages.extend(await message.reply_media_group(list(chunk)))
         self._intermediate_group_message = tuple(messages)
 
