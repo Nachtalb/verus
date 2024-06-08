@@ -357,7 +357,7 @@ class Bot:
 
             group = self.get_group(media)
 
-            if not group:
+            if not group or len(group) == 1 or not self.group_ask:
                 action = "simple_move" if initial_action == "move" else "simple_continue"
             else:
                 await self._clear_intermediate_group_message()
