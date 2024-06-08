@@ -40,8 +40,7 @@ from verus.utils import bool_emoji, chunk_iterable, tqdm_logging_context
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
-MAX_IMAGE_SIDE_LENGTH = 10_000
-MAX_IMAGE_BYTES = 10_000_000  # 10 MB
+TG_MAX_DOWNLOAD_SIZE = 20_000_000
 
 
 class Indexer:
@@ -531,6 +530,12 @@ class Bot:
             media = await update.message.photo[-1].get_file()
             media_path = self.upload_folder / f"{media.file_id}.jpg"
         elif update.message.video:
+            if not update.message.video.file_size:
+                await update.message.reply_text("Video file size is not available.")
+                return
+            if update.message.video.file_size > TG_MAX_DOWNLOAD_SIZE:
+                await update.message.reply_text("Video is too large. Max size is 20 MB.")
+                return
             media = await update.message.video.get_file()
             media_path = self.upload_folder / f"{media.file_id}.mp4"
         else:
