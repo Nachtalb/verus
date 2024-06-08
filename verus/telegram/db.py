@@ -83,11 +83,10 @@ class Media(BaseModel):
         if not self.tg_file_info:
             return None
 
-        if self.tg_file_info["mime_type"].startswith("image"):
-            return PhotoSize.de_json(self.tg_file_info, bot)
-        if self.tg_file_info["mime_type"].startswith("video"):
+        if self.tg_file_info.get("mime_type", "").startswith("video"):
             return Video.de_json(self.tg_file_info, bot)
-        return None
+        else:
+            return PhotoSize.de_json(self.tg_file_info, bot)
 
     @staticmethod
     def unprocessed() -> Query:
