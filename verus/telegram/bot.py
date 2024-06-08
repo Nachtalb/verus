@@ -10,6 +10,7 @@ from itertools import chain
 from pathlib import Path
 from typing import cast
 
+from tabulate import tabulate
 from telegram import (
     CallbackQuery,
     InlineKeyboardButton,
@@ -25,7 +26,7 @@ from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandle
 from tqdm import tqdm
 
 from verus.image import create_tg_thumbnail, create_tg_thumbnail_from_video
-from verus.telegram.db import DATABASE, History, Media, Tag, history_action, setup_db
+from verus.telegram.db import DATABASE, History, Media, MediaTag, Tag, history_action, setup_db
 from verus.utils import bool_emoji, chunk_iterable, tqdm_logging_context
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -275,6 +276,39 @@ class Bot:
 
         await self._next_image(update)
 
+    async def info(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not update.effective_user or not update.message:
+            return
+
+        if update.effective_user.id != int(self.authorized_user_id):
+            await update.message.reply_text("Unauthorized access.")
+            return
+
+        processed_images = Media.select().where(Media._processed == True).count()  # noqa: E712
+        unprocessed_images = Media.select().where(Media._processed == False).count()  # noqa: E712
+        total_images = Media.select().count()
+        media: Media | None = Media.unprocessed().first()
+
+        per_category = {
+            tag.name: Media.select()
+            .join(MediaTag, on=(Media.id == MediaTag.media_id))
+            .where(MediaTag.tag == tag)
+            .count()
+            for tag in self.tags
+        }
+
+        per_category_str = tabulate(per_category.items(), headers=["Category", "Count"], tablefmt="grid")
+
+        await update.message.reply_text(
+            f"Current image: `{media and media.path or 'None'}`\n"
+            f"Categories: {','.join([f'`{tag.name}`' for tag in self.tags])}\n"
+            f"Processed: `{processed_images}`\n"
+            f"Unprocessed: `{unprocessed_images}`\n"
+            f"Total: `{total_images}`\n"
+            f"Per category: \n```{per_category_str}```",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+
     def _buttons(self, media: Media) -> InlineKeyboardMarkup:
         categories = chunk_iterable(
             [
@@ -461,6 +495,7 @@ def main() -> None:
     persistence = PicklePersistence(filepath="verus_bot.dat")
     app = ApplicationBuilder().token(args.token).persistence(persistence).arbitrary_callback_data(True).build()
     app.add_handler(CommandHandler("start", bot.start))
+    app.add_handler(CommandHandler("info", bot.info))
     app.add_handler(CallbackQueryHandler(bot.button))
 
     if hasattr(args, "webhook"):
