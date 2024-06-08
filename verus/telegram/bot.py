@@ -268,16 +268,24 @@ class Bot:
                 else:
                     media_type = InputMediaPhoto(media=raw_image, caption=caption, parse_mode=ParseMode.HTML)
 
-                await message.edit_media(media=media_type, reply_markup=reply_markup)  # type: ignore[union-attr]
+                new_msg = await message.edit_media(media=media_type, reply_markup=reply_markup)  # type: ignore[union-attr]
             else:
                 if is_video:
-                    await message.reply_video(  # type: ignore[union-attr]
+                    new_msg = await message.reply_video(  # type: ignore[union-attr]
                         video=raw_image, caption=caption, reply_markup=reply_markup, parse_mode=ParseMode.HTML
                     )
                 else:
-                    await message.reply_photo(  # type: ignore[union-attr]
+                    new_msg = await message.reply_photo(  # type: ignore[union-attr]
                         photo=raw_image, caption=caption, reply_markup=reply_markup, parse_mode=ParseMode.HTML
                     )
+
+                if new_msg and (tg_file := (new_msg.photo or new_msg.video or new_msg.animation)):
+                    if isinstance(tg_file, list):
+                        tg_file = tg_file[-1]
+
+                    media.tg_file_info = tg_file.to_dict()
+                    media.save()
+
         except BadRequest as e:
             if "Image_process_failed" in str(e):
                 self.logger.error("Image processing failed for %s", media.path)

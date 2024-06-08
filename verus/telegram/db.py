@@ -70,6 +70,8 @@ class Media(BaseModel):
     sha256 = CharField()
     tags = ManyToManyField(Tag, backref="media")
 
+    tg_file_info = JSONField(null=True)
+
     _processed = BooleanField(default=False)
     _processed_at = DateTimeField(null=True)
 
