@@ -16,6 +16,7 @@ from peewee import (
 )
 from playhouse.shortcuts import dict_to_model, model_to_dict
 from playhouse.sqlite_ext import JSONField
+from telegram import Bot, PhotoSize, Video
 
 DATABASE: SqliteDatabase = SqliteDatabase("verus.db")
 
@@ -77,6 +78,16 @@ class Media(BaseModel):
 
     def __str__(self) -> str:
         return self.path  # type: ignore[no-any-return]
+
+    def get_tg_file_obj(self, bot: Bot) -> Video | PhotoSize | None:
+        if not self.tg_file_info:
+            return None
+
+        if self.tg_file_info["mime_type"].startswith("image"):
+            return PhotoSize.de_json(self.tg_file_info, bot)
+        if self.tg_file_info["mime_type"].startswith("video"):
+            return Video.de_json(self.tg_file_info, bot)
+        return None
 
     @staticmethod
     def unprocessed() -> Query:

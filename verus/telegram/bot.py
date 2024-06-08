@@ -224,7 +224,7 @@ class Bot:
         if message is None:
             return
 
-        media = Media.unprocessed().first()
+        media: Media | None = Media.unprocessed().first()
         while media and not Path(media.path).exists():
             media.delete_instance()
             media = Media.unprocessed().first()
@@ -238,9 +238,11 @@ class Bot:
             return
 
         is_video = media.path.endswith((".mp4", ".webm"))
-        raw_image = thumbnail = BytesIO(self._get_or_create_thumbnail(media.path).read_bytes())
-        if is_video:
-            raw_image = BytesIO(Path(media.path).read_bytes())
+        existing_media = media.get_tg_file_obj(message.get_bot())
+        if not existing_media:
+            raw_image = thumbnail = BytesIO(self._get_or_create_thumbnail(media.path).read_bytes())
+            if is_video:
+                raw_image = BytesIO(Path(media.path).read_bytes())
 
         self.logger.info("Current image: %s %s", media.path, media.sha256)
 
@@ -263,28 +265,46 @@ class Bot:
 
                 if is_video:
                     media_type = InputMediaVideo(
-                        media=raw_image, caption=caption, parse_mode=ParseMode.HTML, thumbnail=thumbnail
+                        media=existing_media or raw_image,  # type: ignore[arg-type]
+                        caption=caption,
+                        parse_mode=ParseMode.HTML,
+                        thumbnail=None if existing_media else thumbnail,
                     )
                 else:
-                    media_type = InputMediaPhoto(media=raw_image, caption=caption, parse_mode=ParseMode.HTML)
+                    media_type = InputMediaPhoto(
+                        media=existing_media or raw_image,  # type: ignore[arg-type]
+                        caption=caption,
+                        parse_mode=ParseMode.HTML,
+                    )
 
                 new_msg = await message.edit_media(media=media_type, reply_markup=reply_markup)  # type: ignore[union-attr]
             else:
                 if is_video:
                     new_msg = await message.reply_video(  # type: ignore[union-attr]
-                        video=raw_image, caption=caption, reply_markup=reply_markup, parse_mode=ParseMode.HTML
+                        video=existing_media or raw_image,
+                        caption=caption,
+                        reply_markup=reply_markup,
+                        parse_mode=ParseMode.HTML,
+                        thumbnail=None if existing_media else thumbnail,
                     )
                 else:
                     new_msg = await message.reply_photo(  # type: ignore[union-attr]
-                        photo=raw_image, caption=caption, reply_markup=reply_markup, parse_mode=ParseMode.HTML
+                        photo=existing_media or raw_image,
+                        caption=caption,
+                        reply_markup=reply_markup,
+                        parse_mode=ParseMode.HTML,
                     )
 
-                if new_msg and (tg_file := (new_msg.photo or new_msg.video or new_msg.animation)):
-                    if isinstance(tg_file, list):
-                        tg_file = tg_file[-1]
+            if (
+                not media.tg_file_info
+                and new_msg
+                and (tg_file := (new_msg.photo or new_msg.video or new_msg.animation))
+            ):
+                if isinstance(tg_file, list):
+                    tg_file = tg_file[-1]
 
-                    media.tg_file_info = tg_file.to_dict()
-                    media.save()
+                media.tg_file_info = tg_file.to_dict()
+                media.save()
 
         except BadRequest as e:
             if "Image_process_failed" in str(e):
