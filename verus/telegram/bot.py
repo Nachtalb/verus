@@ -209,7 +209,7 @@ class Bot:
             return
 
         media = Media.unprocessed().first()
-        while not Path(media.path).exists():
+        while media and not Path(media.path).exists():
             media.delete_instance()
             media = Media.unprocessed().first()
 
