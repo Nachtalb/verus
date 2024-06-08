@@ -312,7 +312,10 @@ class Bot:
         await self.send_media_group(group, query.message)  # type: ignore[arg-type]
 
         buttons = [
-            InlineKeyboardButton("Move", callback_data=("group_move", media.path, "")),
+            InlineKeyboardButton("Move", callback_data=("group_move", media.path, move_category)),
+            InlineKeyboardButton(
+                "Move except last", callback_data=("group_move_execpt_last", media.path, move_category)
+            ),
             InlineKeyboardButton(
                 "Cancel",
                 callback_data=(
@@ -383,7 +386,7 @@ class Bot:
                 elif action == "undo":
                     self._undo(media)
             await self._clear_intermediate_group_message()
-        elif action in ["group_move", "group_continue"]:
+        elif action in ["group_move", "group_continue", "group_move_execpt_last"]:
             media = Media.get_or_none(Media.path == path)
 
             group = self.get_group(media)
@@ -391,7 +394,10 @@ class Bot:
                 await query.message.delete()  # type: ignore[attr-defined]
                 force_new = True
 
-            self._group_set_tags(group, media.tags)
+            if action == "group_move_execpt_last" and len(group) > 1:
+                group = group[:-1]
+
+            self._group_set_tags(group, media.tags if action == "group_continue" else [Tag.get_or_create(category)])
             await self._clear_intermediate_group_message()
         elif action == "toggle":
             media = Media.get_or_none(Media.path == path)
