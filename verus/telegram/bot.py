@@ -3,6 +3,7 @@ import logging
 import re
 from argparse import ArgumentParser
 from contextlib import nullcontext
+from functools import reduce
 from io import BytesIO
 from pathlib import Path
 from typing import cast
@@ -34,7 +35,7 @@ from telegram.ext import (
     filters,
 )
 
-from verus.db import DATABASE, History, Media, MediaTag, Tag, history_action, setup_db
+from verus.db import DATABASE, History, Media, MediaTag, Tag, User, history_action, setup_db
 from verus.files import get_supported_files
 from verus.image import create_and_save_tg_thumbnail
 from verus.indexer import Indexer
@@ -50,10 +51,10 @@ class Bot:
     _intermediate_group_message: tuple[Message, ...] = ()
 
     def __init__(
-        self, authorized_user_id: int, image_dir: Path, upload_folder_name: str, import_folder: Path | None = None
+        self, authorized_users: list[User], image_dir: Path, upload_folder_name: str, import_folder: Path | None = None
     ):
         self.logger = logging.getLogger(__name__)
-        self.authorized_user_id = authorized_user_id
+        self.authorized_users = authorized_users
         self.image_dir = image_dir
         self.upload_folder = image_dir / upload_folder_name
         self.import_folder = import_folder
@@ -279,18 +280,10 @@ class Bot:
         if not update.effective_user or not update.message:
             return
 
-        if update.effective_user.id != int(self.authorized_user_id):
-            await update.message.reply_text("Unauthorized access.")
-            return
-
         await self._next_image(update)
 
     async def info(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_user or not update.message:
-            return
-
-        if update.effective_user.id != int(self.authorized_user_id):
-            await update.message.reply_text("Unauthorized access.")
             return
 
         processed_images = Media.select().where(Media._processed == True).count()  # noqa: E712
@@ -320,10 +313,6 @@ class Bot:
 
     async def refresh(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_user or not update.message:
-            return
-
-        if update.effective_user.id != int(self.authorized_user_id):
-            await update.message.reply_text("Unauthorized access.")
             return
 
         message_text = "Refreshing...this may take a while."
@@ -526,18 +515,22 @@ class Bot:
             ]
         )
 
-        await application.bot.send_message(self.authorized_user_id, "Media Sorting Bot started.")
+        for user in self.authorized_users:
+            if not user.telegram_id:
+                continue
+            self.logger.info("Sending message to %s", user.telegram_id)
+            await application.bot.send_message(user.telegram_id, "Media Sorting Bot started.")
 
     async def post_stop(self, application: Application) -> None:  # type: ignore[type-arg]
         self.logger.info("Media Sorting Bot stopped.")
-        await application.bot.send_message(self.authorized_user_id, "Media Sorting Bot stopped.")
+        for user in self.authorized_users:
+            if not user.telegram_id:
+                continue
+            self.logger.info("Sending message to %s", user.telegram_id)
+            await application.bot.send_message(user.telegram_id, "Media Sorting Bot stopped.")
 
     async def receive_new_media(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_user or not update.message:
-            return
-
-        if update.effective_user.id != int(self.authorized_user_id):
-            await update.message.reply_text("Unauthorized access.")
             return
 
         obj: PhotoSize | Video | Document | Animation | None
@@ -614,7 +607,6 @@ class Bot:
 
 def main() -> None:
     parser = ArgumentParser()
-    parser.add_argument("--user", type=int, required=True)
     parser.add_argument("--dir", type=Path, required=True)
     parser.add_argument("--upload-folder-name", type=str, default="misc")
     parser.add_argument("--import-folder", type=Path, default=Path())
@@ -639,7 +631,9 @@ def main() -> None:
 
     import_folder = args.import_folder if Path() != args.import_folder else None
 
-    bot = Bot(args.user, args.dir, args.upload_folder_name, import_folder)
+    admins = list(User.select().where((User.role == "admin") & (User.telegram_id.is_null(False))))
+
+    bot = Bot(admins, args.dir, args.upload_folder_name, import_folder)
 
     persistence = PicklePersistence(filepath="verus_bot.dat")
     app = (
@@ -652,7 +646,12 @@ def main() -> None:
         .build()
     )
 
-    default_filter = filters.ChatType.PRIVATE & filters.User(args.user)
+    users = [filters.User(user.telegram_id) for user in admins]
+    user_filter = users[0]
+    if len(users) > 1:
+        user_filter = reduce(lambda x, y: x | y, users)  # type: ignore[return-value, arg-type]
+
+    default_filter = filters.ChatType.PRIVATE & user_filter
 
     app.add_handler(CommandHandler("start", bot.start, filters=default_filter))
     app.add_handler(CommandHandler("info", bot.info, filters=default_filter))
