@@ -7,7 +7,7 @@ from tabulate import tabulate
 from tqdm import tqdm
 
 from verus.cli.filter import Node, parse_node
-from verus.db import setup_db
+from verus.db import User, setup_db
 from verus.files import get_supported_files
 from verus.image import create_and_save_tg_thumbnail, first_frame
 from verus.indexer import Indexer
@@ -181,6 +181,126 @@ class Verus:
         indexer = Indexer(args.path)
         indexer.index()
 
+    def setup(self, args: Namespace) -> None:
+        """Setup the database.
+
+        Args:
+            args (`Namespace`):
+                The parsed arguments.
+        """
+        self.logger.info("Setting up the database")
+        setup_db()
+
+        system_user = User.get_or_none(User.username == "system")
+        if not system_user:
+            User.create(username="system", role="system")
+            self.logger.info("System user created")
+
+    def user_add(self, args: Namespace) -> None:
+        """Create a new user.
+
+        Args:
+            args (`Namespace`):
+                The parsed arguments.
+        """
+        self.logger.info("Creating user %s", args.username)
+        setup_db()
+        if User.get_or_none(User.username == args.username):
+            self.logger.warning("User %s already exists", args.username)
+            exit(1)
+
+        user = User.create(username=args.username, role=args.role, telegram_id=args.telegram_id)
+        self.logger.info("User %s created with API key %s", user.username, user.api_key)
+
+    def user_edit(self, args: Namespace) -> None:
+        """Edit a user.
+
+        Args:
+            args (`Namespace`):
+                The parsed arguments.
+        """
+        self.logger.info("Editing user %s", args.username)
+        setup_db()
+        user = User.get_or_none(User.username == args.username)
+        if not user:
+            self.logger.warning("User %s does not exist", args.username)
+            exit(1)
+
+        if args.role:
+            user.role = args.role
+        if args.telegram_id:
+            user.telegram_id = args.telegram_id
+
+        user.save()
+        self.logger.info("User %s edited", user.username)
+
+    def user_del(self, args: Namespace) -> None:
+        """Delete a user.
+
+        Args:
+            args (`Namespace`):
+                The parsed arguments.
+        """
+        self.logger.info("Deleting user %s", args.username)
+        setup_db()
+        user = User.get_or_none(User.username == args.username)
+        if not user:
+            self.logger.warning("User %s does not exist", args.username)
+            exit(1)
+
+        user.delete_instance()
+        self.logger.info("User %s deleted", args.username)
+
+    def user_list(self, args: Namespace) -> None:
+        """List all users.
+
+        Args:
+            args (`Namespace`):
+                The parsed arguments.
+        """
+        self.logger.info("Listing all users")
+        setup_db()
+        users = User.select()
+        print(
+            tabulate(
+                ((user.username, user.partial_api_key(), user.role, user.telegram_id) for user in users),
+                headers=["Username", "API Key", "Role", "Telegram ID"],
+            )
+        )
+
+    def user_reset(self, args: Namespace) -> None:
+        """Reset a user's API key.
+
+        Args:
+            args (`Namespace`):
+                The parsed arguments.
+        """
+        self.logger.info("Resetting API key for user %s", args.username)
+        setup_db()
+        user = User.get_or_none(User.username == args.username)
+        if not user:
+            self.logger.warning("User %s does not exist", args.username)
+            exit(1)
+
+        new_key = user.recreate_api_key()
+        self.logger.info("API key for user %s reset to %s", user.username, new_key)
+
+    def user_show(self, args: Namespace) -> None:
+        """Show a user's API key.
+
+        Args:
+            args (`Namespace`):
+                The parsed arguments.
+        """
+        self.logger.info("Showing API key for user %s", args.username)
+        setup_db()
+        user = User.get_or_none(User.username == args.username)
+        if not user:
+            self.logger.warning("User %s does not exist", args.username)
+            exit(1)
+
+        self.logger.info("API key for user %s is %s", user.username, user.api_key)
+
 
 def main() -> None:
     parser = ArgumentParser(description="Verus - Image Tag Prediction and Organisation Tool")
@@ -190,6 +310,40 @@ def main() -> None:
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose logging.")
 
     sub_parsers = parser.add_subparsers()
+
+    db_parser = sub_parsers.add_parser("db", help="Manage the database.")
+    db_sub_parsers = db_parser.add_subparsers()
+    db_setup_parser = db_sub_parsers.add_parser("setup", help="Setup the database.")
+    db_setup_parser.set_defaults(func="setup")
+
+    db_user_parser = db_sub_parsers.add_parser("user", help="Manage users.")
+    db_user_sub_parsers = db_user_parser.add_subparsers()
+    db_user_add_parser = db_user_sub_parsers.add_parser("add", help="Create a new user.")
+    db_user_add_parser.add_argument("username", type=str, help="Username of the new user.")
+    db_user_add_parser.add_argument("--role", type=str, default="user", help="Role of the new user.")
+    db_user_add_parser.add_argument("--telegram-id", type=int, default=None, help="Telegram ID of the new user.")
+    db_user_add_parser.set_defaults(func="user_add")
+
+    db_user_edit_parser = db_user_sub_parsers.add_parser("edit", help="Edit a user.")
+    db_user_edit_parser.add_argument("username", type=str, help="Username of the user to edit.")
+    db_user_edit_parser.add_argument("--role", type=str, default=None, help="Role of the user.")
+    db_user_edit_parser.add_argument("--telegram-id", type=int, default=None, help="Telegram ID of the user.")
+    db_user_edit_parser.set_defaults(func="user_edit")
+
+    db_user_del_parser = db_user_sub_parsers.add_parser("del", help="Delete a user.")
+    db_user_del_parser.add_argument("username", type=str, help="Username of the user to delete.")
+    db_user_del_parser.set_defaults(func="user_del")
+
+    db_user_list_parser = db_user_sub_parsers.add_parser("list", help="List all users.")
+    db_user_list_parser.set_defaults(func="user_list")
+
+    db_user_reset_parser = db_user_sub_parsers.add_parser("reset", help="Reset a user's api key.")
+    db_user_reset_parser.add_argument("username", type=str, help="Username of the user to reset.")
+    db_user_reset_parser.set_defaults(func="user_reset")
+
+    db_user_show_parser = db_user_sub_parsers.add_parser("show", help="Show a user's api key.")
+    db_user_show_parser.add_argument("username", type=str, help="Username of the user to show.")
+    db_user_show_parser.set_defaults(func="user_show")
 
     thumbs_parser = sub_parsers.add_parser("thumbs", help="Generate thumbnails for images.")
     thumbs_parser.add_argument("path", type=Path, help="Input folder containing PNG and JPEG images.")
