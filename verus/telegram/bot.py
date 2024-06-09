@@ -376,7 +376,7 @@ class Bot:
         return InlineKeyboardMarkup(buttons)
 
     async def _clear_intermediate_group_message(self) -> None:
-        if not self._intermediate_group_message:
+        if self._intermediate_group_message:
             msg = self._intermediate_group_message[0]
             bot = msg.get_bot()
             await bot.delete_messages(msg.chat.id, [m.message_id for m in self._intermediate_group_message])
