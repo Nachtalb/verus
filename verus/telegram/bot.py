@@ -177,7 +177,7 @@ class Bot:
         reply_markup = self._buttons(media)
 
         try:
-            send_func = self.send_video if media.path.endswith((".mp4", ".webm")) else self.send_photo
+            send_func = self.send_video if media.path.endswith((".mp4", ".gif")) else self.send_photo
             new_msg = await send_func(
                 media,
                 message,  # type: ignore[arg-type]
@@ -560,7 +560,7 @@ class Bot:
             return
 
         ext = Path(media.file_path).suffix
-        if ext not in [".jpg", ".jpeg", ".png", ".mp4", ".webm"]:
+        if ext not in [".jpg", ".jpeg", ".png", ".mp4"]:
             await update.message.reply_text("Unsupported file type.")
             return
 
