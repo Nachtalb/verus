@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import logging
 import re
 import shutil
@@ -67,6 +68,7 @@ class Bot:
         self.toggle_mode: bool = False
         self.group_ask: bool = True
         self.tags = Tag.select()
+        self.indexer = Indexer(self.image_dir)
 
     def _undo(self, media: Media) -> None:
         self.logger.info("Undo: %s", media.path)
@@ -327,8 +329,7 @@ class Bot:
         total_images = Media.select().count()
         total_tags = Tag.select().count()
 
-        indexer = Indexer(self.image_dir)
-        new, removed = indexer.index()
+        new, removed = self.indexer.index()
 
         new_total_images = Media.select().count()
         new_total_tags = Tag.select().count()
@@ -526,6 +527,10 @@ class Bot:
             self.logger.info("Sending message to %s", user.telegram_id)
             await application.bot.send_message(user.telegram_id, "Media Sorting Bot stopped.")
 
+    def hash_str_to_int(self, s: str) -> int:
+        hash_value = int(hashlib.sha256(s.encode()).hexdigest(), 16)
+        return (hash_value & 0xFFFFFFFFFFFFFFFF) + 0x80000000  # Masking to 64 bits and adding base value (1b)
+
     async def receive_new_media(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_user or not update.message:
             return
@@ -556,7 +561,11 @@ class Bot:
             await update.message.reply_text("Unsupported file type.")
             return
 
-        media_path = self.upload_folder / f"{media.file_id}{ext}"
+        group_id_str = ""
+        if group_id := update.message.media_group_id:
+            group_id_str = f"_g{self.hash_str_to_int(group_id)}_"
+
+        media_path = self.upload_folder / f"{media.file_id}{group_id_str}{ext}"
 
         if media_path.exists():
             existing_media: Media | None = Media.get_or_none(Media.path == str(media_path))

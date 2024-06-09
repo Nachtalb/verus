@@ -98,7 +98,7 @@ class Indexer:
         return list(inserted_images), counter
 
     def _extract_id(self, filename: str) -> str | None:
-        match = re.search(r"_(\d+)_p\d+\.", filename)
+        match = re.search(r"_g?(\d+)_p\d+\.", filename)
         return match.group(1) if match else None
 
     def _check_for_stales(self, medias: list[Media]) -> list[tuple[Media, bool]]:
