@@ -3,11 +3,12 @@ import logging
 from argparse import ArgumentParser, Namespace
 from pathlib import Path
 
+from peewee import fn
 from tabulate import tabulate
 from tqdm import tqdm
 
 from verus.cli.filter import Node, parse_node
-from verus.db import User, setup_db
+from verus.db import DATABASE, History, Media, User, setup_db
 from verus.files import get_supported_files
 from verus.image import create_and_save_tg_thumbnail, first_frame
 from verus.indexer import Indexer
@@ -305,6 +306,42 @@ class Verus:
 
         self.logger.info("API key for user %s is %s", user.username, user.api_key)
 
+    def migrate(self, args: Namespace) -> None:
+        """Migrate the database.
+
+        Args:
+            args (`Namespace`):
+                The parsed arguments.
+        """
+        self.logger.info("Migrating the database to %s", args.new_path)
+        setup_db()
+
+        with DATABASE.atomic():
+            medias = Media.update(path=fn.REPLACE(Media.path, args.prev_path, args.new_path)).execute()
+            for entry in tqdm(History.select(), desc="Migrating histories"):
+                entry.before = json.loads(json.dumps(entry.before).replace(args.prev_path, args.new_path))
+                entry.after = json.loads(json.dumps(entry.after).replace(args.prev_path, args.new_path))
+                entry.save()
+
+        self.logger.info("Migrated %d medias and %d histories", medias, History.select().count())
+
+    def list_media(self, args: Namespace) -> None:
+        """List all media in the database.
+
+        Args:
+            args (`Namespace`):
+                The parsed arguments.
+        """
+        self.logger.info("Listing all media")
+        setup_db()
+        medias: list[Media] = Media.select().limit(args.limit)
+        print(
+            tabulate(
+                ((media.id, media.path, media.sha256, media._processed, media._processed_at) for media in medias),
+                headers=["ID", "Path", "SHA256", "Processed", "Processed At"],
+            )
+        )
+
 
 def main() -> None:
     parser = ArgumentParser(description="Verus - Image Tag Prediction and Organisation Tool")
@@ -319,6 +356,15 @@ def main() -> None:
     db_sub_parsers = db_parser.add_subparsers()
     db_setup_parser = db_sub_parsers.add_parser("setup", help="Setup the database.")
     db_setup_parser.set_defaults(func="setup")
+
+    db_list_media_parser = db_sub_parsers.add_parser("list-media", help="List all media in the database.")
+    db_list_media_parser.add_argument("--limit", type=int, default=10, help="Limit the number of results.")
+    db_list_media_parser.set_defaults(func="list_media")
+
+    db_migrate_parser = db_sub_parsers.add_parser("migrate", help="Migrate the database.")
+    db_migrate_parser.add_argument("prev_path", type=str, help="Path to the old files")
+    db_migrate_parser.add_argument("new_path", type=str, help="Path to the new files")
+    db_migrate_parser.set_defaults(func="migrate")
 
     db_user_parser = db_sub_parsers.add_parser("user", help="Manage users.")
     db_user_sub_parsers = db_user_parser.add_subparsers()
