@@ -118,23 +118,6 @@ class Bot:
         match = re.search(r"_(\d+)_p\d+\.", filename)
         return match.group(1) if match else None
 
-    def get_group(self, media: Media, non_processed_only: bool = True) -> list[Media]:
-        if not media:
-            return []
-
-        id = self.extract_id(media.path)
-
-        if not id:
-            return []
-
-        group = Media.select().where(Media.path.contains(id))
-
-        if non_processed_only:
-            group = group.where(Media._processed == False)  # noqa: E712
-
-        group = sorted(group, key=lambda item: Path(item.path).name)
-        return group  # type: ignore[no-any-return]
-
     async def send_media_group(self, group: list[Media], message: Message) -> None:
         id = self.extract_id(group[0].path)
         pixiv_url = f"https://www.pixiv.net/artworks/{id}"
@@ -399,7 +382,7 @@ class Bot:
         self._intermediate_group_message = ()
 
     async def ask_for_group_action(self, media: Media, action: str, move_category: str, query: CallbackQuery) -> None:
-        group = self.get_group(media)
+        group = media.get_group(non_processed_only=True)
 
         if not group or not query.message:
             # something went wrong
@@ -444,7 +427,7 @@ class Bot:
         if action in ["continue", "move"]:
             media = Media.get_or_none(Media.path == path)
 
-            group = self.get_group(media)
+            group = media.get_group(non_processed_only=True)
 
             if not group or len(group) == 1 or not self.group_ask:
                 action = "simple_move" if initial_action == "move" else "simple_continue"
@@ -479,7 +462,7 @@ class Bot:
             media = Media.get_or_none(Media.path == path)
             tags = media.tags if "continue" in action else [Tag.get_or_create(category)]
 
-            group = self.get_group(media)
+            group = media.get_group(non_processed_only=True)
             if query.message:
                 await query.message.delete()  # type: ignore[attr-defined]
                 force_new = True
@@ -498,7 +481,7 @@ class Bot:
                     self._toggle(media, category)
         elif action == "more":
             media = Media.get_or_none(Media.path == path)
-            group = self.get_group(media, non_processed_only=False)
+            group = media.get_group()
             if not group or not query.message:
                 await query.answer("No group found.")
             else:

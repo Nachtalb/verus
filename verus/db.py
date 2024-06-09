@@ -69,11 +69,13 @@ class Tag(BaseModel):
 
 
 class Media(BaseModel):
+    name = CharField()
     path = CharField(unique=True)
     sha256 = CharField()
     tags = ManyToManyField(Tag, backref="media")
 
     tg_file_info = JSONField(null=True)
+    group_id = IntegerField(null=True)
 
     _processed = BooleanField(default=False)
     _processed_at = DateTimeField(null=True)
@@ -89,6 +91,16 @@ class Media(BaseModel):
             return Video.de_json(self.tg_file_info, bot)
         else:
             return PhotoSize.de_json(self.tg_file_info, bot)
+
+    def get_group(self, non_processed_only: bool = False) -> "list[Media]":
+        if not self.group_id:
+            if non_processed_only and not self._processed:
+                return [self]
+            return []
+        medias = Media.select().where(Media.group_id == self.group_id).order_by(Media.name)
+        if non_processed_only:
+            return list(medias.where(Media._processed == False))  # noqa: E712
+        return list(medias)
 
     @staticmethod
     def unprocessed() -> Query:

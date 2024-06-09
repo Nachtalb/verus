@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -64,7 +65,12 @@ class Indexer:
             hashes = self._load_image_hashes(list(new_images))
 
             self.logger.info("Inserting new images into the database")
-            Media.insert_many([{"path": str(image), "sha256": hash} for image, hash in hashes.items()]).execute()
+            Media.insert_many(
+                [
+                    {"name": image.name, "path": str(image), "sha256": hash, "group_id": self._extract_id(str(image))}
+                    for image, hash in hashes.items()
+                ]
+            ).execute()
             inserted_images = Media.select().where(Media.id > last_id)
 
             for path, image in tqdm(zip(new_images, inserted_images), desc="Adding tags"):
@@ -90,6 +96,10 @@ class Indexer:
         self._create_thumbnails([image.path for image in inserted_images])
 
         return list(inserted_images), counter
+
+    def _extract_id(self, filename: str) -> str | None:
+        match = re.search(r"_(\d+)_p\d+\.", filename)
+        return match.group(1) if match else None
 
     def _check_for_stales(self, medias: list[Media]) -> list[tuple[Media, bool]]:
         """Check for stale files.
