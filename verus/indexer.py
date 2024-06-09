@@ -37,6 +37,39 @@ class Indexer:
         self.image_dir = image_dir
         self.extensions = extensions
 
+    def index_single(self, path: Path) -> Media | None:
+        """Index a single image.
+
+        Args:
+            path (`Path`):
+                The path to the image.
+
+        Returns:
+            `Media | None`: The indexed image or None if the image does not exist.
+        """
+        self.logger.info("Indexing single image %s", path)
+        if not path.exists() or not path.is_file():
+            self.logger.error("File %s does not exist", path)
+            if media := Media.get_or_none(Media.path == str(path)):
+                self.delete_media(media)
+            return None
+
+        with DATABASE.atomic():
+            tag = Tag.get_or_create(path.parent.name)
+            if media := Media.get_or_none(Media.path == str(path)):
+                self.logger.info("Image %s already indexed", path)
+                if tag not in media.tags:
+                    media.tags.add(tag)
+                    media.save()
+                return media  # type: ignore[no-any-return]
+
+            hash = hash_file(path)
+            media = Media.create(name=path.name, path=str(path), sha256=hash, group_id=self._extract_id(str(path)))
+            media.tags.add(tag)
+            media.save()
+
+        return media  # type: ignore[no-any-return]
+
     def index(self) -> tuple[list[Media], int]:
         """Index images in the directory.
 
@@ -85,17 +118,26 @@ class Indexer:
             if exists:
                 continue
 
-            self.logger.info("Removing stale image %s", image.path)
-            MediaTag.delete().where(MediaTag.media_id == image.id).execute()
-            image.delete_instance(recursive=True)
-            thumb = Path(f"{image.path}.thumb.jpg")
-            if thumb.exists():
-                thumb.unlink()
+            self.delete_media(image)
             counter += 1
 
         self._create_thumbnails([image.path for image in inserted_images])
 
         return list(inserted_images), counter
+
+    def delete_media(self, media: Media) -> None:
+        """Delete a media including its dependencies.
+
+        Args:
+            media (`Media`):
+                The media to delete.
+        """
+        self.logger.info("Removing stale image %s", media.path)
+        MediaTag.delete().where(MediaTag.media_id == media.id).execute()
+        media.delete_instance(recursive=True)
+        thumb = Path(f"{media.path}.thumb.jpg")
+        if thumb.exists():
+            thumb.unlink()
 
     def _extract_id(self, filename: str) -> str | None:
         match = re.search(r"_g?(\d+)_p\d+\.", filename)
