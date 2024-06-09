@@ -4,7 +4,7 @@ from pathlib import Path
 from tqdm import tqdm
 
 from verus.const import SUPPORTED_EXTENSIONS
-from verus.db import DATABASE, Media, Tag
+from verus.db import DATABASE, Media, MediaTag, Tag
 from verus.files import get_supported_files, hash_file
 from verus.image import create_and_save_tg_thumbnail
 from verus.utils import run_multiprocessed
@@ -34,11 +34,11 @@ class Indexer:
         self.image_dir = image_dir
         self.extensions = extensions
 
-    def index(self) -> list[Media]:
+    def index(self) -> tuple[list[Media], int]:
         """Index images in the directory.
 
         Returns:
-            `list[Media]`: The images that were indexed.
+            `tuple[list[Media], int]`: The inserted images and the number of stale images removed.
         """
         self.logger.info("Indexing images in %s", self.image_dir)
 
@@ -71,9 +71,23 @@ class Indexer:
                     image.tags.add(tag)
                     image.save()
 
+        self.logger.info("Check for stale images")
+        images = known_images
+        counter = 0
+        for image in images:
+            path = Path(image.path)
+            if not path.exists():
+                self.logger.info("Removing stale image %s", image.path)
+                MediaTag.delete().where(MediaTag.media_id == image.id).execute()
+                image.delete_instance(recursive=True)
+                thumb = path.with_name(f"{path.stem}.thumb.jpg")
+                if thumb.exists():
+                    thumb.unlink()
+                counter += 1
+
         self._create_thumbnails([image.path for image in inserted_images])
 
-        return list(inserted_images)
+        return list(inserted_images), counter
 
     def _load_image_hashes(self, images: list[Path]) -> dict[Path, str]:
         """Load the hashes of images.

@@ -340,15 +340,17 @@ class Bot:
         total_tags = Tag.select().count()
 
         indexer = Indexer(self.image_dir)
-        indexer.index()
+        new, removed = indexer.index()
 
         new_total_images = Media.select().count()
         new_total_tags = Tag.select().count()
 
-        if total_images == new_total_images and total_tags == new_total_tags:
-            message_text += "done.\nNo new images or tags found."
-        else:
+        if new or removed or total_tags != new_total_tags:
             message_text += f"done.\n  Images: `{total_images}` => `{new_total_images}`\n  Tags: `{total_tags}` => `{new_total_tags}`"
+            if removed:
+                message_text += f"\n  Removed Stale: {removed}"
+        else:
+            message_text += "done.\nNo new images or tags found."
 
         message_text += "\nRefresh complete. Use /start to begin."
         await message.edit_text(message_text, parse_mode=ParseMode.MARKDOWN)
