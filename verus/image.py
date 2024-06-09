@@ -28,6 +28,19 @@ def first_frame(video_path: Path) -> Image.Image:
     return Image.fromarray(frame)
 
 
+def get_dimensions(image: ImageLike) -> tuple[int, int]:
+    """Get the dimensions of an image.
+
+    Args:
+        image (Path | BytesIO | Image.Image): Image to get the dimensions of
+
+    Returns:
+        tuple[int, int]: Image dimensions
+    """
+    image = _get_pil_image(image)
+    return image.size
+
+
 def create_tg_thumbnail_from_video(video_path: Path, max_side_length: int = THUMB_MAX_SIDE_LENGTH) -> Image.Image:
     """Create a Telegram compatible thumbnail from a video file.
 

@@ -37,7 +37,7 @@ from telegram.ext import (
 
 from verus.db import DATABASE, History, Media, MediaTag, Tag, User, history_action, setup_db
 from verus.files import get_supported_files
-from verus.image import create_and_save_tg_thumbnail
+from verus.image import create_and_save_tg_thumbnail, get_dimensions
 from verus.indexer import Indexer
 from verus.utils import bool_emoji, chunk_iterable
 
@@ -235,6 +235,7 @@ class Bot:
     ) -> Message:
         video = self.video_or_raw(media)
         thumbnail = create_and_save_tg_thumbnail(media.path, MAX_THUMBNAIL_SIZE) if isinstance(video, BytesIO) else None
+        width, height = get_dimensions(thumbnail) if thumbnail else (None, None)
 
         if update_message:
             input_media = InputMediaVideo(
@@ -242,6 +243,8 @@ class Bot:
                 caption=caption,
                 parse_mode=ParseMode.HTML,
                 thumbnail=thumbnail,
+                width=width,
+                height=height,
             )
             return await message.edit_media(media=input_media, reply_markup=buttons)  # type: ignore[return-value]
         else:
@@ -251,6 +254,8 @@ class Bot:
                 reply_markup=buttons,
                 parse_mode=ParseMode.HTML,
                 thumbnail=thumbnail,
+                width=width,
+                height=height,
             )
 
     async def send_photo(
