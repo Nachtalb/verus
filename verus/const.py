@@ -3,8 +3,8 @@ from pathlib import Path
 
 from PIL import Image
 
-SUPPORTED_EXTENSIONS = ["jpeg", "jpg", "png", "gif", "webp", "webm", "mp4"]
-VIDEO_EXTENSIONS = ["webm", "mp4"]
+SUPPORTED_EXTENSIONS = ["jpeg", "jpg", "png", "gif", "webp", "mp4"]
+VIDEO_EXTENSIONS = ["mp4"]
 IMAGE_EXTENSIONS = ["jpeg", "jpg", "png", "gif", "webp"]
 
 SUPPORTED_EXTENSIONS_GLOB = ["*." + ext for ext in SUPPORTED_EXTENSIONS]
