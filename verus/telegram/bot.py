@@ -36,6 +36,7 @@ from telegram.ext import (
     filters,
 )
 
+from verus.const import TG_BASE_URL, TG_MAX_DOWNLOAD_SIZE
 from verus.db import DATABASE, History, Media, MediaTag, Tag, User, history_action, setup_db
 from verus.files import get_supported_files
 from verus.image import create_and_save_tg_thumbnail, get_dimensions
@@ -43,9 +44,6 @@ from verus.indexer import Indexer
 from verus.utils import bool_emoji, chunk_iterable
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-
-TG_MAX_DOWNLOAD_SIZE = 20_000_000
-MAX_THUMBNAIL_SIZE = 1024
 
 
 class Bot:
@@ -221,7 +219,7 @@ class Bot:
         if isinstance(photo, PhotoSize):
             return photo
         if as_thumbnail:
-            return BytesIO(create_and_save_tg_thumbnail(media.path, MAX_THUMBNAIL_SIZE).read_bytes())
+            return BytesIO(create_and_save_tg_thumbnail(media.path).read_bytes())
         return BytesIO(Path(media.path).read_bytes())
 
     def video_or_raw(self, media: Media, as_thumbnail: bool = True) -> Video | BytesIO:
@@ -229,7 +227,7 @@ class Bot:
         if isinstance(video, Video):
             return video
         if as_thumbnail:
-            return BytesIO(create_and_save_tg_thumbnail(media.path, MAX_THUMBNAIL_SIZE).read_bytes())
+            return BytesIO(create_and_save_tg_thumbnail(media.path).read_bytes())
         return BytesIO(Path(media.path).read_bytes())
 
     async def send_video(
@@ -241,7 +239,7 @@ class Bot:
         caption: str | None = None,
     ) -> Message:
         video = self.video_or_raw(media, as_thumbnail=False)
-        thumbnail = create_and_save_tg_thumbnail(media.path, MAX_THUMBNAIL_SIZE) if isinstance(video, BytesIO) else None
+        thumbnail = create_and_save_tg_thumbnail(media.path) if isinstance(video, BytesIO) else None
         width, height = get_dimensions(thumbnail) if thumbnail else (None, None)
 
         if update_message:
@@ -559,7 +557,7 @@ class Bot:
         if not obj.file_size:
             await update.message.reply_text("File size is not available.")
             return
-        elif obj.file_size > TG_MAX_DOWNLOAD_SIZE:
+        elif not self.local_mode and obj.file_size > TG_MAX_DOWNLOAD_SIZE:
             await update.message.reply_text("File is too large. Max size is 20 MB.")
             return
 
@@ -630,7 +628,7 @@ def main() -> None:
     parser.add_argument("--token", required=True)
     parser.add_argument("--log", type=Path, default=Path("log.json"))
     # Typical local path: "http://localhost:8081/bot"
-    parser.add_argument("--base-url", default="https://api.telegram.org/bot", help="Base URL for the bot API")
+    parser.add_argument("--base-url", default=TG_BASE_URL, help="Base URL for the bot API")
     parser.add_argument("--local-mode", action="store_true", help="Run the bot in local mode", default=False)
 
     sub_parsers = parser.add_subparsers()
@@ -653,7 +651,13 @@ def main() -> None:
 
     admins = list(User.select().where((User.role == "admin") & (User.telegram_id.is_null(False))))
 
-    bot = Bot(admins, args.dir, args.upload_folder_name, import_folder, args.local_mode)
+    bot = Bot(
+        authorized_users=admins,
+        image_dir=args.dir,
+        upload_folder_name=args.upload_folder_name,
+        import_folder=import_folder,
+        local_mode=args.local_mode,
+    )
 
     persistence = PicklePersistence(filepath="verus_bot.dat")
     app = (
