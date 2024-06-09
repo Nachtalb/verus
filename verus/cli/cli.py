@@ -131,9 +131,13 @@ class Verus:
 
         for file in tqdm(files):
             if file.suffix in [".mp4", ".webm"]:
-                frame = first_frame(file)
-                prediction = self.client.predict(frame, args.threshold)
-                prediction.image_path = file
+                try:
+                    frame = first_frame(file)
+                    prediction = self.client.predict(frame, args.threshold)
+                    prediction.image_path = file
+                except Exception as e:
+                    self.logger.error(f"Error processing video {file}, {e}")
+                    continue
             else:
                 prediction = self.client.predict(file, args.threshold)
 
