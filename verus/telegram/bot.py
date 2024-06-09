@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import re
+import shutil
 from argparse import ArgumentParser
 from contextlib import nullcontext
 from functools import reduce
@@ -51,13 +52,19 @@ class Bot:
     _intermediate_group_message: tuple[Message, ...] = ()
 
     def __init__(
-        self, authorized_users: list[User], image_dir: Path, upload_folder_name: str, import_folder: Path | None = None
+        self,
+        authorized_users: list[User],
+        image_dir: Path,
+        upload_folder_name: str,
+        import_folder: Path | None = None,
+        local_mode: bool = False,
     ):
         self.logger = logging.getLogger(__name__)
         self.authorized_users = authorized_users
         self.image_dir = image_dir
         self.upload_folder = image_dir / upload_folder_name
         self.import_folder = import_folder
+        self.local_mode = local_mode
 
         self.toggle_mode: bool = False
         self.group_ask: bool = True
@@ -586,10 +593,13 @@ class Bot:
         progress_msg = await update.message.reply_text(
             f"Receiving media `{media_path.name}`...", parse_mode=ParseMode.MARKDOWN
         )
-        out = BytesIO()
-        await media.download_to_memory(out)
 
-        media_path.write_bytes(out.getvalue())
+        if self.local_mode and Path(media.file_path).exists():
+            shutil.copyfile(media.file_path, media_path)
+        else:
+            out = BytesIO()
+            await media.download_to_memory(out)
+            media_path.write_bytes(out.getvalue())
 
         await progress_msg.delete()
         await update.message.reply_text(
@@ -643,7 +653,7 @@ def main() -> None:
 
     admins = list(User.select().where((User.role == "admin") & (User.telegram_id.is_null(False))))
 
-    bot = Bot(admins, args.dir, args.upload_folder_name, import_folder)
+    bot = Bot(admins, args.dir, args.upload_folder_name, import_folder, args.local_mode)
 
     persistence = PicklePersistence(filepath="verus_bot.dat")
     app = (
