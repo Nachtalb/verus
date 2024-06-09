@@ -174,9 +174,8 @@ def history_action(media: Media, action: str, data: dict[str, Any] = {}) -> Gene
     History.create(media=media, action=action, before=before, after=after, data=data)
 
 
-def setup_db(db_path: str) -> SqliteDatabase:
+def setup_db() -> SqliteDatabase:
     global DATABASE
-    #  DATABASE = SqliteDatabase(db_path)
     DATABASE.connect()
     DATABASE.create_tables([Tag, Media, MediaTag, History])
     return DATABASE

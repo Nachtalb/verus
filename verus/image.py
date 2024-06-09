@@ -4,13 +4,9 @@ from pathlib import Path
 import cv2
 from PIL import Image, ImageFile
 
+from verus.const import TG_MAX_IMAGE_RATIO, TG_MAX_TOTAL_IMAGE_SIDE_LENGTH, THUMB_MAX_SIDE_LENGTH, ImageLike
+
 ImageFile.LOAD_TRUNCATED_IMAGES = True
-
-TG_MAX_TOTAL_IMAGE_SIDE_LENGTH = 10_000
-TG_MAX_IMAGE_BYTES = 10_000_000  # 10 MB
-TG_MAX_IMAGE_RATIO = 20
-
-ImageLike = Path | BytesIO | Image.Image
 
 
 def first_frame(video_path: Path) -> Image.Image:
@@ -32,7 +28,7 @@ def first_frame(video_path: Path) -> Image.Image:
     return Image.fromarray(frame)
 
 
-def create_tg_thumbnail_from_video(video_path: Path, max_side_length: int = -1) -> Image.Image:
+def create_tg_thumbnail_from_video(video_path: Path, max_side_length: int = THUMB_MAX_SIDE_LENGTH) -> Image.Image:
     """Create a Telegram compatible thumbnail from a video file.
 
     Args:
@@ -45,7 +41,7 @@ def create_tg_thumbnail_from_video(video_path: Path, max_side_length: int = -1) 
     return create_tg_thumbnail(first_frame(video_path), max_side_length)
 
 
-def create_tg_thumbnail(image: ImageLike, max_side_length: int = -1) -> Image.Image:
+def create_tg_thumbnail(image: ImageLike, max_side_length: int = THUMB_MAX_SIDE_LENGTH) -> Image.Image:
     """Create a Telegram compatible thumbnail.
 
     Args:
@@ -65,7 +61,9 @@ def create_tg_thumbnail(image: ImageLike, max_side_length: int = -1) -> Image.Im
     return image
 
 
-def create_and_save_tg_thumbnail(image: Path, max_side_length: int = -1, output_path: Path | None = None) -> Path:
+def create_and_save_tg_thumbnail(
+    image: Path, max_side_length: int = THUMB_MAX_SIDE_LENGTH, output_path: Path | None = None
+) -> Path:
     """Create and save a Telegram compatible thumbnail.
 
     Args:

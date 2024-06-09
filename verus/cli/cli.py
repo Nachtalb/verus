@@ -1,39 +1,83 @@
 import json
 import logging
 from argparse import ArgumentParser, Namespace
-from concurrent.futures import ProcessPoolExecutor, as_completed
-from io import BytesIO
-from itertools import chain
 from pathlib import Path
 
-import cv2
 from tabulate import tabulate
 from tqdm import tqdm
 
-from verus.client import PredictClient
-from verus.filter import Node, parse_node
-from verus.image import create_tg_thumbnail, create_tg_thumbnail_from_video
-from verus.utils import with_tqdm_logging
+from verus.cli.filter import Node, parse_node
+from verus.db import setup_db
+from verus.files import get_supported_files
+from verus.image import create_and_save_tg_thumbnail, first_frame
+from verus.indexer import Indexer
+from verus.ml.client import PredictClient
+from verus.utils import run_multiprocessed, with_tqdm_logging
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
 
 class Verus:
+    """Verus - Image Tag Prediction and Organisation Tool.
+
+    Args:
+        tags_path (`Path`):
+            Path to the tags configuration file.
+        host (`str`, optional):
+            Host the daemon runs on. Defaults to "localhost".
+        port (`int`, optional):
+            Port the daemon runs on. Defaults to 65432.
+
+    Attributes:
+        client (`PredictClient`):
+            The client to communicate with the prediction daemon.
+        tags (`dict[str, Node]`):
+            The tags configuration.
+        logger (`logging.Logger`):
+            The logger for the Verus instance.
+    """
+
     def __init__(self, tags_path: Path, host: str = "localhost", port: int = 65432):
         self.client = PredictClient(host, port)
         self.tags = self.load_tags(tags_path)
         self.logger = logging.getLogger("Verus")
 
     def load_tags(self, tags_path: Path) -> dict[str, Node]:
+        """Load the tags configuration from a file.
+
+        Args:
+            tags_path (`Path`):
+                Path to the tags configuration file.
+
+        Returns:
+            `dict[str, Node]`: The tags configuration.
+        """
         return {tag: parse_node(data) for tag, data in json.loads(tags_path.read_text()).items()}
 
     def identify_main_tag(self, tags: dict[str, float], nodes: dict[str, Node]) -> str:
+        """Identify the main tag for a set of tags.
+
+        Args:
+            tags (`dict[str, float]`):
+                The tags to identify.
+            nodes (`dict[str, Node]`):
+                The tag nodes to evaluate.
+
+        Returns:
+            `str`: The main tag.
+        """
         for tag, node in nodes.items():
             if node.evaluate(tags):
                 return tag
         return ""
 
     def identify(self, args: Namespace) -> None:
+        """Identify tags for a single file.
+
+        Args:
+            args (`Namespace`):
+                The parsed arguments.
+        """
         self.logger.info("Identifying image %s", args.image)
         if not args.image.is_file():
             raise ValueError("Output must be a file")
@@ -57,34 +101,38 @@ class Verus:
             print(json.dumps(json_data, indent=2))
 
     def _identify_new_dir_name(self, tags: dict[str, float], nodes: dict[str, Node]) -> str | None:
+        """Identify the new directory name for a set of tags.
+
+        Args:
+            tags (`dict[str, float]`):
+                The tags to identify.
+            nodes (`dict[str, Node]`):
+                The tag nodes to evaluate.
+
+        Returns:
+            `str | None`: The new directory name or None if no match was found.
+        """
         for tag, node in nodes.items():
             if node.evaluate(tags):
                 return tag
         return None
 
-    def extract_frame(self, video_path: Path) -> bytes:
-        cap = cv2.VideoCapture(str(video_path))
-        ret, frame = cap.read()
-        cap.release()
-        if not ret:
-            raise ValueError("Failed to extract frame from video")
-
-        return cv2.imencode(".jpg", frame)[1].tobytes()
-
-    def get_files(self, path: Path) -> list[Path]:
-        types = ["*.png", "*.jpeg", "*.jpg", "*.gif", "*.mp4", "*.webm"]
-        return list(chain(*[path.rglob(t) for t in types]))
-
     @with_tqdm_logging
     def move(self, args: Namespace) -> None:
+        """Move images based on their predicted tags.
+
+        Args:
+            args (`Namespace`):
+                The parsed arguments.
+        """
         self.logger.info("Moving images from %s to %s", args.path, args.output)
 
-        files = self.get_files(args.path)
+        files = get_supported_files(args.path)
 
         for file in tqdm(files):
             if file.suffix in [".mp4", ".webm"]:
-                frame = self.extract_frame(file)
-                prediction = self.client.predict(BytesIO(frame), args.threshold)
+                frame = first_frame(file)
+                prediction = self.client.predict(frame, args.threshold)
                 prediction.image_path = file
             else:
                 prediction = self.client.predict(file, args.threshold)
@@ -108,39 +156,30 @@ class Verus:
             else:
                 self.logger.info(f"skipped \t{file.name}")
 
-    @staticmethod
-    def _create_thumbnail(file: Path) -> Path:
-        thumb_path = file.with_name(f"{file.stem}.thumb.jpg")
-        if thumb_path.is_file():
-            return thumb_path
-
-        if file.suffix in [".mp4", ".webm"]:
-            thumb = create_tg_thumbnail_from_video(file, 1024)
-        else:
-            thumb = create_tg_thumbnail(file, 1024)
-
-        thumb.save(thumb_path, format="JPEG", quality=70)
-        thumb.close()
-        return thumb_path
-
     @with_tqdm_logging
     def thumbs(self, args: Namespace) -> None:
+        """Generate thumbnails for images.
+
+        Args:
+            args (`Namespace`):
+                The parsed arguments.
+        """
         self.logger.info("Generating thumbnails for images in %s", args.path)
-        files = set(self.get_files(args.path))
+        files = set(get_supported_files(args.path))
+        run_multiprocessed(create_and_save_tg_thumbnail, files)
 
-        existing_thumbs = {f for f in files if "thumb" in f.stem}
-        filtered_files = files - existing_thumbs
+    @with_tqdm_logging
+    def index(self, args: Namespace) -> None:
+        """Index images in a folder.
 
-        with ProcessPoolExecutor() as executor:
-            futures = [executor.submit(Verus._create_thumbnail, image) for image in filtered_files]
-
-            pbar = tqdm(as_completed(futures), total=len(filtered_files))
-
-            for future in pbar:
-                try:
-                    future.result()
-                except Exception as e:
-                    self.logger.error(e)
+        Args:
+            args (`Namespace`):
+                The parsed arguments.
+        """
+        self.logger.info("Indexing images in %s", args.path)
+        setup_db()
+        indexer = Indexer(args.path)
+        indexer.index()
 
 
 def main() -> None:
@@ -156,6 +195,10 @@ def main() -> None:
     thumbs_parser.add_argument("path", type=Path, help="Input folder containing PNG and JPEG images.")
     thumbs_parser.set_defaults(func="thumbs")
 
+    indexer_parser = sub_parsers.add_parser("index", help="Index images in a folder.")
+    indexer_parser.add_argument("path", type=Path, help="Input folder containing image/video files.")
+    indexer_parser.set_defaults(func="index")
+
     mv_parser = sub_parsers.add_parser("move", help="Move images based on their predicted tags.")
     mv_parser.add_argument("path", type=Path, help="Input folder containing PNG and JPEG images.")
     mv_parser.add_argument("output", type=Path, help="Output folder to move the tagged images.")
@@ -163,7 +206,7 @@ def main() -> None:
     mv_parser.add_argument("--save-json", action="store_true", help="Save the filtered tags as a JSON file.")
     mv_parser.add_argument("--full-json", action="store_true", help="Save the full prediction result as a JSON file.")
     mv_parser.add_argument("--dry-run", action="store_true", help="Perform a dry run without actually moving files.")
-    mv_parser.add_argument("--unknown-dir", type=str, default="unknown", help="Directory for unmatched images.")
+    mv_parser.add_argument("--unknown-dir", type=str, default="misc", help="Directory for unmatched images.")
     mv_parser.add_argument("--no-move-unknown", action="store_true", help="Do not move unmatched files.")
     mv_parser.set_defaults(func="move")
 

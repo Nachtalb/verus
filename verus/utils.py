@@ -1,6 +1,7 @@
 import itertools
 import logging
 import socket
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from contextlib import contextmanager
 from functools import wraps
 from typing import Any, Callable, Generator, Iterable, TypeVar
@@ -10,11 +11,56 @@ from tqdm import tqdm
 T = TypeVar("T")
 
 
+def run_multiprocessed(
+    func: Callable[..., T], /, *iterable: Any, desc: str | None = None, ordered: bool = False
+) -> list[T]:
+    """Run a function in parallel processes.
+
+    Args:
+        func (`Callable`):
+            The function to run in parallel processes.
+        *iterable (`Any`):
+            The arguments to pass to the function.
+        desc (`str`, optional):
+            The description to use for the progress bar. Defaults to None.
+
+    Returns:
+        `list[T]`: The results of the function for each argument.
+
+    """
+    with ProcessPoolExecutor() as executor:
+        if not ordered:
+            futures = [executor.submit(func, *args) for args in zip(*iterable)]
+            return list(future.result() for future in tqdm(as_completed(futures), total=len(iterable[0]), desc=desc))
+        else:
+            return list(tqdm(executor.map(func, *iterable), total=len(iterable[0]), desc=desc))
+
+
 def bool_emoji(value: bool) -> str:
+    """Return an emoji representing a boolean value.
+
+    Args:
+        value (`bool`):
+            The boolean value to represent.
+
+    Returns:
+        `str`: The emoji representing the boolean value.
+    """
     return "✅" if value else "❌"
 
 
 def receive_all(sock: socket.socket, buffer_size: int = 4096) -> bytes:
+    """Receive all data from a socket, given the data ends with a newline.
+
+    Args:
+        sock (`socket.socket`):
+            The socket to receive data from.
+        buffer_size (`int`, optional):
+            The buffer size to use when receiving data. Defaults to 4096.
+
+    Returns:
+        `bytes`: The received data.
+    """
     data = b""
     while True:
         part = sock.recv(buffer_size)
@@ -72,7 +118,15 @@ def tqdm_logging_context() -> Generator[None, None, None]:
 
 
 def with_tqdm_logging(func: Callable[..., Any]) -> Callable[..., Any]:
-    """Decorator to use tqdm logging context for a function."""
+    """Decorator to use tqdm logging context for a function.
+
+    Args:
+        func (`Callable`):
+            The function to decorate.
+
+    Returns:
+        `Callable`: The decorated function.
+    """
 
     @wraps(func)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -94,25 +148,8 @@ def chunk_iterable(iterable: Iterable[T], chunk_size: int) -> Iterable[Iterable[
         chunk_size (`int`):
             Size of the chunks. Must be a strictly positive integer (e.g. >0).
 
-    Example:
-
-    ```python
-    >>> from huggingface_hub.utils import chunk_iterable
-
-    >>> for items in chunk_iterable(range(17), chunk_size=8):
-    ...     print(items)
-    # [0, 1, 2, 3, 4, 5, 6, 7]
-    # [8, 9, 10, 11, 12, 13, 14, 15]
-    # [16] # smaller last chunk
-    ```
-
-    Raises:
-        [`ValueError`](https://docs.python.org/3/library/exceptions.html#ValueError)
-            If `chunk_size` <= 0.
-
-    <Tip warning={true}>
-        The last chunk can be smaller than `chunk_size`.
-    </Tip>
+    Yields:
+        `Iterable[T]`: The next chunk of the iterable.
     """
     if not isinstance(chunk_size, int) or chunk_size <= 0:
         raise ValueError("`chunk_size` must be a strictly positive integer (>0).")

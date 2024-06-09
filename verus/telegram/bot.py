@@ -1,13 +1,9 @@
 import asyncio
-import hashlib
 import logging
 import re
 from argparse import ArgumentParser
-from concurrent.futures import ProcessPoolExecutor
 from contextlib import nullcontext
-from functools import partial
 from io import BytesIO
-from itertools import chain
 from pathlib import Path
 from typing import cast
 
@@ -37,68 +33,17 @@ from telegram.ext import (
     PicklePersistence,
     filters,
 )
-from tqdm import tqdm
 
+from verus.db import DATABASE, History, Media, MediaTag, Tag, history_action, setup_db
+from verus.files import get_supported_files
 from verus.image import create_and_save_tg_thumbnail
-from verus.telegram.db import DATABASE, History, Media, MediaTag, Tag, history_action, setup_db
-from verus.utils import bool_emoji, chunk_iterable, tqdm_logging_context
+from verus.indexer import Indexer
+from verus.utils import bool_emoji, chunk_iterable
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
 TG_MAX_DOWNLOAD_SIZE = 20_000_000
 MAX_THUMBNAIL_SIZE = 1024
-
-
-class Indexer:
-    def __init__(self, image_dir: Path, extensions: list[str] = ["jpg", "jpeg", "png", "mp4"]):
-        self.image_dir = image_dir
-        self.extensions = extensions
-        self.logger = logging.getLogger(__name__)
-
-    def index(self) -> list[Media]:
-        self.logger.info("Indexing images in %s", self.image_dir)
-
-        with DATABASE.atomic():
-            tags = {
-                path.name: Tag.get_or_create(path.name)
-                for path in self.image_dir.iterdir()
-                if path.is_dir() and not path.name.startswith(".")
-            }
-
-            known_images = Media.select()
-            last_id = 0
-            if known_images:
-                last_id = Media.select().first().id
-
-            images = list(chain(*[self.image_dir.rglob(f"*.{ext}") for ext in self.extensions]))
-            images = [image for image in images if "thumb" not in image.name]
-            images.sort()
-            new_images = set(images) - {Path(image.path) for image in known_images}
-
-            self.logger.info("Found %d new images", len(new_images))
-            hashes = self._load_image_hashes(list(new_images))
-
-            self.logger.info("Inserting new images into the database")
-            Media.insert_many([{"path": str(image), "sha256": hash} for image, hash in hashes.items()]).execute()
-            inserted_images = Media.select().where(Media.id > last_id)
-
-            for path, image in tqdm(zip(new_images, inserted_images), desc="Adding tags"):
-                tag = tags[path.parent.name]
-                if tag not in image.tags:
-                    image.tags.add(tag)
-                    image.save()
-
-        return Media.select()  # type: ignore[no-any-return]
-
-    def _load_image_hashes(self, images: list[Path]) -> dict[Path, str]:
-        with tqdm_logging_context():
-            with ProcessPoolExecutor() as executor:
-                return dict(zip(images, tqdm(executor.map(self._get_image_hash, images), total=len(images))))
-
-    def _get_image_hash(self, image_path: Path) -> str:
-        hasher = hashlib.sha256(image_path.read_bytes())
-
-        return hasher.hexdigest()
 
 
 class Bot:
@@ -373,16 +318,6 @@ class Bot:
             parse_mode=ParseMode.MARKDOWN,
         )
 
-    def _bulk_create_thumbnails(self, medias: list[Media]) -> None:
-        with ProcessPoolExecutor() as executor:
-            self.logger.info("Creating thumbnails for %d images", len(medias))
-            futures = [
-                executor.submit(create_and_save_tg_thumbnail, media.path, MAX_THUMBNAIL_SIZE) for media in medias
-            ]
-
-            for future in tqdm(futures, desc="Creating thumbnails", total=len(medias)):
-                future.result()
-
     async def refresh(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_user or not update.message:
             return
@@ -395,7 +330,7 @@ class Bot:
         message = await update.message.reply_text(message_text)
 
         if self.import_folder:
-            files = list(self.import_folder.rglob("*"))
+            files = get_supported_files(self.import_folder)
             message_text += f"\nImporting {len(files)} files..."
             await message.edit_text(message_text)
             for file in files:
@@ -420,14 +355,6 @@ class Bot:
             message_text += "done.\nNo new images or tags found."
         else:
             message_text += f"done.\n  Images: `{total_images}` => `{new_total_images}`\n  Tags: `{total_tags}` => `{new_total_tags}`"
-
-        new_images = Media.select().where(Media._processed == False)  # noqa: E712
-        if new_images:
-            message_text += "\nCreating thumbnails..."
-            await message.edit_text(message_text, parse_mode=ParseMode.MARKDOWN)
-
-            self._bulk_create_thumbnails(new_images)
-            message_text += "done."
 
         message_text += "\nRefresh complete. Use /start to begin."
         await message.edit_text(message_text, parse_mode=ParseMode.MARKDOWN)
@@ -693,7 +620,6 @@ def main() -> None:
     parser.add_argument("--import-folder", type=Path, default=Path())
     parser.add_argument("--token", required=True)
     parser.add_argument("--log", type=Path, default=Path("log.json"))
-    parser.add_argument("--db", type=Path, default=Path("verus.db"))
 
     sub_parsers = parser.add_subparsers()
     webhook_parser = sub_parsers.add_parser("webhook")
@@ -706,7 +632,7 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    setup_db(args.db)
+    setup_db()
 
     indexer = Indexer(args.dir)
     indexer.index()

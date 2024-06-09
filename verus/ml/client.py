@@ -7,6 +7,9 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any, Generator
 
+from PIL import Image
+
+from verus.const import ImageLike
 from verus.utils import receive_all
 
 
@@ -95,7 +98,7 @@ class PredictClient:
 
     def predict(
         self,
-        image: Path | BytesIO,
+        image: ImageLike,
         score_threshold: float,
         conn: socket.socket | None = None,
     ) -> Prediction:
@@ -106,6 +109,10 @@ class PredictClient:
             data["image_path"] = str(image)
         elif isinstance(image, BytesIO):
             data["image"] = self.to_base64(image.getvalue())
+        elif isinstance(image, Image.Image):
+            bytes_io = BytesIO()
+            image.save(bytes_io, format="JPEG", quality=70)
+            data["image"] = self.to_base64(bytes_io.getvalue())
         else:
             raise ValueError("Unsupported image type")
 

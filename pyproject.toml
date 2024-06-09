@@ -89,6 +89,6 @@ module = 'playhouse.sqlite_ext'
 ignore_missing_imports = true
 
 [tool.poetry.scripts]
-verusd = "verus.daemon:main"
-verus = "verus.cli:main"
+verusd = "verus.ml.daemon:main"
+verus = "verus.cli.cli:main"
 verus-bot = "verus.telegram.bot:main"
