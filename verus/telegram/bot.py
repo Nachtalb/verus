@@ -233,7 +233,7 @@ class Bot:
         buttons: InlineKeyboardMarkup | None = None,
         caption: str | None = None,
     ) -> Message:
-        video = self.video_or_raw(media)
+        video = self.video_or_raw(media, as_thumbnail=False)
         thumbnail = create_and_save_tg_thumbnail(media.path, MAX_THUMBNAIL_SIZE) if isinstance(video, BytesIO) else None
         width, height = get_dimensions(thumbnail) if thumbnail else (None, None)
 
