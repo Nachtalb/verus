@@ -619,6 +619,9 @@ def main() -> None:
     parser.add_argument("--import-folder", type=Path, default=Path())
     parser.add_argument("--token", required=True)
     parser.add_argument("--log", type=Path, default=Path("log.json"))
+    # Typical local path: "http://localhost:8081/bot"
+    parser.add_argument("--base-url", default="https://api.telegram.org/bot", help="Base URL for the bot API")
+    parser.add_argument("--local-mode", action="store_true", help="Run the bot in local mode", default=False)
 
     sub_parsers = parser.add_subparsers()
     webhook_parser = sub_parsers.add_parser("webhook")
@@ -650,6 +653,8 @@ def main() -> None:
         .arbitrary_callback_data(True)
         .post_init(bot.post_init)
         .post_stop(bot.post_stop)
+        .base_url(args.base_url)
+        .local_mode(args.local_mode)
         .build()
     )
 
