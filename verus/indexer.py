@@ -1,4 +1,6 @@
 import logging
+import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from tqdm import tqdm
@@ -72,22 +74,48 @@ class Indexer:
                     image.save()
 
         self.logger.info("Check for stale images")
-        images = known_images
         counter = 0
-        for image in images:
-            path = Path(image.path)
-            if not path.exists():
-                self.logger.info("Removing stale image %s", image.path)
-                MediaTag.delete().where(MediaTag.media_id == image.id).execute()
-                image.delete_instance(recursive=True)
-                thumb = path.with_name(f"{path.stem}.thumb.jpg")
-                if thumb.exists():
-                    thumb.unlink()
-                counter += 1
+        for image, exists in self._check_for_stales(known_images):
+            if exists:
+                continue
+
+            self.logger.info("Removing stale image %s", image.path)
+            MediaTag.delete().where(MediaTag.media_id == image.id).execute()
+            image.delete_instance(recursive=True)
+            thumb = Path(f"{image.path}.thumb.jpg")
+            if thumb.exists():
+                thumb.unlink()
+            counter += 1
 
         self._create_thumbnails([image.path for image in inserted_images])
 
         return list(inserted_images), counter
+
+    def _check_for_stales(self, medias: list[Media]) -> list[tuple[Media, bool]]:
+        """Check for stale files.
+
+        Args:
+            medias (`list[Media]`):
+                The images to check for staleness.
+
+        Returns:
+            `list[Media]`: The stale medias.
+        """
+        self.logger.info("Checking for stale images")
+        with ThreadPoolExecutor() as executor:
+            return list(zip(medias, executor.map(self._check_file_exists, [media.path for media in medias])))
+
+    def _check_file_exists(self, path: str) -> bool:
+        """Check if a file exists.
+
+        Args:
+            path (`str`):
+                The path to check.
+
+        Returns:
+            `bool`: Whether the file exists.
+        """
+        return os.path.exists(path)
 
     def _load_image_hashes(self, images: list[Path]) -> dict[Path, str]:
         """Load the hashes of images.
