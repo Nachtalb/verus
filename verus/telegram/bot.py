@@ -529,7 +529,7 @@ class Bot:
 
     def hash_str_to_int(self, s: str) -> int:
         hash_value = int(hashlib.sha256(s.encode()).hexdigest(), 16)
-        return (hash_value & 0xFFFFFFFFFFFFFFFF) + 0x80000000  # Masking to 64 bits and adding base value (1b)
+        return (hash_value & 0xFFFFFFFFFF) + 0x80000000  # Masking to 48 bits and adding base value (1b)
 
     async def receive_new_media(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_user or not update.message:
@@ -563,7 +563,7 @@ class Bot:
 
         group_id_str = ""
         if group_id := update.message.media_group_id:
-            group_id_str = f"_g{self.hash_str_to_int(group_id)}_"
+            group_id_str = f"_g{self.hash_str_to_int(group_id)}_p{update.message.message_id}"
 
         media_path = self.upload_folder / f"{media.file_id}{group_id_str}{ext}"
 
