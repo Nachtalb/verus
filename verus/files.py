@@ -31,9 +31,11 @@ def get_supported_files(root: Path, exclude_thumbs: bool = True) -> list[Path]:
     Returns:
         `list[Path]`: The paths of the supported files.
     """
+    files = rglob_multiple_patterns(root, SUPPORTED_EXTENSIONS_GLOB)
     if exclude_thumbs:
-        return [path for path in rglob_multiple_patterns(root, SUPPORTED_EXTENSIONS_GLOB) if "thumb" not in path.name]
-    return rglob_multiple_patterns(root, SUPPORTED_EXTENSIONS_GLOB)
+        files = [path for path in files if "thumb" not in path.name]
+    files.sort(key=lambda p: p.name)
+    return files
 
 
 def rglob_multiple_patterns(root: Path, patterns: list[str]) -> list[Path]:
