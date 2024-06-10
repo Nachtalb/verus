@@ -194,7 +194,7 @@ class Bot:
             f"<b>Category: {categories}</b>\n"
             f"Mode: {'toggle' if self.toggle_mode else 'move'}\n"
             f"Name: <code>{Path(media.path).name}</code>\n"
-            f"SHA256: <code>{media.sha256}</code>\n"
+            f"Group ID: <code>{media.group_id or '-'}</code>\n"
             f"Progress: {processed_images}/{total_images} {processed_images/total_images*100:.2f}%"
         )
         return caption
@@ -358,6 +358,12 @@ class Bot:
 
         buttons = [
             [InlineKeyboardButton("Continue", callback_data=("continue", media.path, ""))],
+            [
+                InlineKeyboardButton(
+                    "As Previous: " + ", ".join(map(str, self._previous_tags(media))),
+                    callback_data=("same", media.path, ""),
+                )
+            ],
             *[list(row) for row in categories],
             [
                 InlineKeyboardButton(
@@ -407,6 +413,13 @@ class Bot:
             parse_mode=ParseMode.MARKDOWN,
         )
 
+    def _previous_tags(self, exclude: Media | None = None) -> list[Tag]:
+        last_action = History.latest_action(exclude)
+        if not last_action:
+            return []
+
+        return list(last_action.media.tags)
+
     async def button(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
         if not query or not query.data:
@@ -422,10 +435,23 @@ class Bot:
         force_new = False
 
         initial_action = action
+        if action == "same":
+            action = "continue"
+            media = Media.get_or_none(Media.path == path)
+            previous_tags = self._previous_tags(media)
+            if not previous_tags:
+                await query.answer("No last action found.")
+                return
+
+            with history_action(media, action="same"):
+                media.tags.clear()
+                for tag in previous_tags:
+                    media.tags.add(tag)
+
         if action in ["continue", "move"] and not self.group_ask:
             action = "simple_" + action
 
-        if action in ["continue", "move"]:
+        if action in ["continue", "move", "same"]:
             media = Media.get_or_none(Media.path == path)
 
             group = media.get_group(non_processed_only=True)

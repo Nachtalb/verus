@@ -173,8 +173,11 @@ class History(BaseModel):
         self.delete_instance()
 
     @staticmethod
-    def latest_action() -> "History | None":
-        return History.select().order_by(History.timestamp.desc()).first()  # type: ignore[no-any-return]
+    def latest_action(exclude: Media | None = None) -> "History | None":
+        history = History.select().order_by(History.timestamp.desc())
+        if exclude:
+            history = history.where(History.media != exclude)
+        return history.first()  # type: ignore[no-any-return]
 
 
 MediaTag = Media.tags.get_through_model()
