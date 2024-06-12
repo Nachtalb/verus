@@ -51,7 +51,9 @@ repos:
           - types-Pillow
           - python-telegram-bot[ext]
           - opencv-python-headless
-          - fastapi
+          - quart
+          - python-magic
+          - uvicorn
   - repo: https://github.com/pre-commit/mirrors-prettier
     rev: v4.0.0-alpha.8
     hooks:

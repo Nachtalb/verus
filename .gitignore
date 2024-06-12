@@ -343,3 +343,4 @@ log.json
 verus_bot.dat
 verus.db
 api-server/
+cache.jsonl

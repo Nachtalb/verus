@@ -4,10 +4,8 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from tqdm import tqdm
-
 from verus.const import SUPPORTED_EXTENSIONS
-from verus.db import DATABASE, Media, MediaTag, Tag
+from verus.db import Media, MediaTag, Tag, atomic
 from verus.files import get_supported_files, hash_file
 from verus.image import create_and_save_tg_thumbnail
 from verus.utils import run_multiprocessed
@@ -37,139 +35,183 @@ class Indexer:
         self.image_dir = image_dir
         self.extensions = extensions
 
-    def index_single(self, path: Path) -> Media | None:
+    def index_file(self, path: Path, hash: str, tag: Tag) -> tuple[Media, bool]:
         """Index a single image.
 
         Args:
             path (`Path`):
                 The path to the image.
+            hash (`str`):
+                The hash of the image.
+            tag (`Tag`):
+                The default tag to assign to images, if the image is new or does not have any tags.
 
         Returns:
-            `Media | None`: The indexed image or None if the image does not exist.
+            `tuple[Media, bool]`:
+                The indexed image and whether the image was new.
         """
         self.logger.info("Indexing single image %s", path)
-        if not path.exists() or not path.is_file():
-            self.logger.error("File %s does not exist", path)
-            if media := Media.get_or_none(Media.path == str(path)):
-                self.delete_media(media)
-            return None
 
-        with DATABASE.atomic():
-            tag = Tag.get_or_create(path.parent.name)
-            if media := Media.get_or_none(Media.path == str(path)):
-                self.logger.info("Image %s already indexed", path)
-                if tag not in media.tags:
-                    media.tags.add(tag)
-                    media.save()
-                return media  # type: ignore[no-any-return]
+        media = Media.get_or_none(Media.sha256 == hash)
 
-            hash = hash_file(path)
-            media = Media.create(name=path.name, path=str(path), sha256=hash, group_id=self._extract_id(str(path)))
+        if media:
+            self.logger.info("File %s already indexed", path)
+            if not media.tags:
+                media.tags.add(tag)
+                media.save()
+            return media, False
+
+        media = Media.create(
+            name=path.name,
+            path=str(path),
+            sha256=hash,
+            group_id=self._extract_id(path.name),
+        )
+        if tag not in media.tags:
             media.tags.add(tag)
             media.save()
+        return media, True
 
-        return media  # type: ignore[no-any-return]
+    def index_single(self, path: Path, tag: Tag, check_stale: bool = True) -> tuple[Media | None, bool]:
+        """Index a single image.
 
-    def index(self) -> tuple[list[Media], int]:
+        Note:
+            Stale files will be removed from the DB.
+
+        Args:
+            path (`Path`):
+                The path to the image.
+            tag (`Tag`):
+                The default tag to assign to images, if the image is new or does not have any tags.
+            check_stale (`bool`, optional):
+                Whether to check for stale files and mark them. Defaults to True.
+
+        Returns:
+            `tuple[Media | None, bool]`:
+                The indexed image and whether the image was new.
+        """
+        self.logger.info("Indexing single image %s", path)
+        file_hash = hash_file(path)
+
+        media = Media.get_or_none(Media.sha256 == file_hash)
+        file_exists = os.path.exists(path)
+        if not file_exists and not media:
+            return None, False
+        elif check_stale and not file_exists and media:
+            self.check_and_mark_as_stale(media)
+            return media, False
+
+        return self.index_file(path, file_hash, tag)
+
+    def index(self, tag: Tag, check_stale: bool = True) -> tuple[list[Media], int]:
         """Index images in the directory.
+
+
+        Args:
+            tag (`Tag`):
+                The default tag to assign to images.
+            check_stale (`bool`, optional):
+                Whether to check for stale files and mark them. Defaults to True.
 
         Returns:
             `tuple[list[Media], int]`: The inserted images and the number of stale images removed.
         """
-        self.logger.info("Indexing images in %s", self.image_dir)
+        known_media: list[Media] = Media.select()
 
-        with DATABASE.atomic():
-            tags = {
-                path.name: Tag.get_or_create(path.name)
-                for path in self.image_dir.iterdir()
-                if path.is_dir() and not path.name.startswith(".")
-            }
+        if check_stale:
+            self.logger.info("Check for stale media files")
+            not_stale = Media.select().where(Media.stale == False).count()  # noqa: E712
+            self.check_and_mark_all_stale()
+            not_stale_after = Media.select().where(Media.stale == False).count()  # noqa: E712
+            stale_files = not_stale - not_stale_after
+            self.logger.info("Removed %d stale media files", stale_files)
 
+        self.logger.info("Indexing files in %s", self.image_dir)
+        with atomic():
             last_media: Media | None = Media.select().order_by(Media.id.desc()).first()
             last_id: int = 0 if not last_media else last_media.id
 
-            images = get_supported_files(self.image_dir)
-            images.sort(key=lambda path: path.stem)
+            files = get_supported_files(self.image_dir)
+            files.sort(key=lambda path: path.stem)
 
-            known_images = Media.select()
-            new_images = set(images) - {Path(image.path) for image in known_images}
+            known_hashes: set[str] = {media.sha256 for media in known_media}
+            new_files_v1 = set(files) - {Path(media.path) for media in known_media}
 
-            self.logger.info("Found %d new images", len(new_images))
-            hashes = self._load_image_hashes(list(new_images))
+            self.logger.info("Found %d new media files", len(new_files_v1))
+            hashes = self.load_image_hashes(list(new_files_v1))
 
-            self.logger.info("Inserting new images into the database")
+            new_files_v2 = {file for file, hash in hashes.items() if hash not in known_hashes}
+
+            if len(new_files_v1) < len(new_files_v2):
+                for file in new_files_v1 - new_files_v2:
+                    self.logger.warning("File %s already indexed", file)
+                    file.unlink()
+            if len(new_files_v2) == 0:
+                return [], stale_files
+
+            hashes = {file: hash for file, hash in hashes.items() if file in new_files_v2}
+
+            self.logger.info("Inserting new media files into the database")
             Media.insert_many(
                 [
-                    {"name": image.name, "path": str(image), "sha256": hash, "group_id": self._extract_id(str(image))}
-                    for image, hash in hashes.items()
+                    {"name": file.name, "path": str(file), "sha256": hash, "group_id": self._extract_id(str(file))}
+                    for file, hash in hashes.items()
                 ]
             ).execute()
-            inserted_images = Media.select().where(Media.id > last_id)
 
-            for path, image in tqdm(zip(new_images, inserted_images), desc="Adding tags"):
-                tag = tags[path.parent.name]
-                if tag not in image.tags:
-                    image.tags.add(tag)
-                    image.save()
+            new_media = Media.select(Media.id, Media.path).where(Media.id > last_id)
+            MediaTag.insert_many([{"media_id": media.id, "tag_id": tag.id} for media in new_media]).execute()
 
-        self.logger.info("Check for stale images")
-        counter = 0
-        for image, exists in self._check_for_stales(known_images):
-            if exists:
-                continue
+        self._create_thumbnails([media.path for media in new_media])
 
-            self.delete_media(image)
-            counter += 1
-
-        self._create_thumbnails([image.path for image in inserted_images])
-
-        return list(inserted_images), counter
-
-    def delete_media(self, media: Media) -> None:
-        """Delete a media including its dependencies.
-
-        Args:
-            media (`Media`):
-                The media to delete.
-        """
-        self.logger.info("Removing stale image %s", media.path)
-        MediaTag.delete().where(MediaTag.media_id == media.id).execute()
-        media.delete_instance(recursive=True)
-        thumb = Path(f"{media.path}.thumb.jpg")
-        if thumb.exists():
-            thumb.unlink()
+        return list(new_media), stale_files
 
     def _extract_id(self, filename: str) -> str | None:
         match = re.search(r"_g?(\d+)_p\d+\.", filename)
         return match.group(1) if match else None
 
-    def _check_for_stales(self, medias: list[Media]) -> list[tuple[Media, bool]]:
-        """Check for stale files.
+    def check_and_mark_as_stale(self, media: Media) -> bool:
+        """Check and mark media as stale.
 
         Args:
-            medias (`list[Media]`):
-                The images to check for staleness.
+            media_or_hash (`Media`):
+                The media or hash to check for staleness.
 
         Returns:
-            `list[Media]`: The stale medias.
+            `bool`: Whether the media is stale.
         """
-        self.logger.info("Checking for stale images")
-        with ThreadPoolExecutor() as executor:
-            return list(zip(medias, executor.map(self._check_file_exists, [media.path for media in medias])))
+        if media.stale and os.path.exists(media.path):
+            media.stale = False
+            media.save()
+            return False
+        elif not media.stale and not os.path.exists(media.path):
+            self.logger.error("Stale file %s marked", media.path)
+            media.stale = True
+            media.save()
+            return True
+        return media.stale
 
-    def _check_file_exists(self, path: str) -> bool:
-        """Check if a file exists.
+    def check_and_mark_all_stale(self) -> None:
+        """Check and mark all applicable media as stale."""
+        with atomic():
+            media: list[Media] = list(Media.select())
+            with ThreadPoolExecutor() as executor:
+                stale_info = list(
+                    executor.map(
+                        os.path.exists,
+                        [media.path for media in media],
+                    ),
+                )
 
-        Args:
-            path (`str`):
-                The path to check.
+                for media, exists in zip(media, stale_info):
+                    if not exists and not media.stale:
+                        media.stale = True
+                        media.save()
+                    elif exists and media.stale:
+                        media.stale = False
+                        media.save()
 
-        Returns:
-            `bool`: Whether the file exists.
-        """
-        return os.path.exists(path)
-
-    def _load_image_hashes(self, images: list[Path]) -> dict[Path, str]:
+    def load_image_hashes(self, images: list[Path]) -> dict[Path, str]:
         """Load the hashes of images.
 
         Args:
@@ -182,12 +224,12 @@ class Indexer:
         self.logger.info("Hashing %d images", len(images))
         return dict(zip(images, run_multiprocessed(hash_file, images, desc="Hashing images", ordered=True)))
 
-    def _create_thumbnails(self, images: list[Path]) -> None:
-        """Create thumbnails for images.
+    def _create_thumbnails(self, files: list[Path]) -> None:
+        """Create thumbnails for media files.
 
         Args:
-            images (`list[Path]`):
-                The images to create thumbnails for.
+            files (`list[Path]`):
+                The media files to create thumbnails for.
         """
-        self.logger.info("Creating thumbnails for %d images", len(images))
-        run_multiprocessed(create_and_save_tg_thumbnail, images, desc="Creating thumbnails")
+        self.logger.info("Creating thumbnails for %d media files", len(files))
+        run_multiprocessed(create_and_save_tg_thumbnail, files, desc="Creating thumbnails")

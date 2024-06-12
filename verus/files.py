@@ -1,10 +1,12 @@
 import hashlib
 import itertools
+from functools import cache
 from pathlib import Path
 
-from verus.const import SUPPORTED_EXTENSIONS_GLOB
+from verus.const import SUPPORTED_EXTENSIONS, SUPPORTED_EXTENSIONS_GLOB
 
 
+@cache
 def hash_file(file_path: Path) -> str:
     """Hash a file using SHA-256.
 
@@ -15,8 +17,37 @@ def hash_file(file_path: Path) -> str:
     Returns:
         `str`: The SHA-256 hash of the file.
     """
-    sha256 = hashlib.sha256(file_path.read_bytes())
+    sha256 = hashlib.sha256()
+    with open(file_path, "rb") as file:
+        while chunk := file.read(4096):
+            sha256.update(chunk)
     return sha256.hexdigest()
+
+
+def hash_bytes(data: bytes) -> str:
+    """Hash bytes using SHA-256.
+
+    Args:
+        data (`bytes`):
+            The bytes to hash.
+
+    Returns:
+        `str`: The SHA-256 hash of the bytes.
+    """
+    return hashlib.sha256(data).hexdigest()
+
+
+def is_supported(path: Path) -> bool:
+    """Check if a file is supported.
+
+    Args:
+        path (`Path`):
+            The path to the file to check.
+
+    Returns:
+        `bool`: Whether the file is supported.
+    """
+    return path.suffix.lower().lstrip(".") in SUPPORTED_EXTENSIONS
 
 
 def get_supported_files(root: Path, exclude_thumbs: bool = True) -> list[Path]:

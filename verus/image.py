@@ -1,24 +1,39 @@
+import tempfile
 from io import BytesIO
 from pathlib import Path
 
 import cv2
 from PIL import Image, ImageFile
 
-from verus.const import TG_MAX_IMAGE_RATIO, TG_MAX_TOTAL_IMAGE_SIDE_LENGTH, THUMB_MAX_SIDE_LENGTH, ImageLike
+from verus.const import TG_MAX_IMAGE_RATIO, TG_MAX_TOTAL_IMAGE_SIDE_LENGTH, THUMB_MAX_SIDE_LENGTH, FileLike, ImageLike
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
-def first_frame(video_path: Path) -> Image.Image:
+def first_frame(video: FileLike) -> Image.Image:
     """Extract the first frame from a video file.
 
     Args:
-        video_path (Path): Path to the video file
+
 
     Returns:
         Image.Image: First frame of the video
     """
-    cap = cv2.VideoCapture(str(video_path))
+
+    with tempfile.NamedTemporaryFile() as file:
+        if isinstance(video, BytesIO):
+            video_path = Path(file.name)
+            video_path.write_bytes(video.getvalue())
+        else:
+            video_path = Path(video)
+
+        cap = cv2.VideoCapture(str(video_path))
+        ret, frame = cap.read()
+        cap.release()
+    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    return Image.fromarray(frame)
+
+    cap = cv2.VideoCapture(str(video))
     ret, frame = cap.read()
     cap.release()
     if not ret:
@@ -75,25 +90,25 @@ def create_tg_thumbnail(image: ImageLike, max_side_length: int = THUMB_MAX_SIDE_
 
 
 def create_and_save_tg_thumbnail(
-    image: Path, max_side_length: int = THUMB_MAX_SIDE_LENGTH, output_path: Path | None = None
+    file: Path, max_side_length: int = THUMB_MAX_SIDE_LENGTH, output_path: Path | None = None
 ) -> Path:
     """Create and save a Telegram compatible thumbnail.
 
     Args:
-        image (Path): Image to convert
+        file (Path): Media file to create thumbnail from
         max_side_length (int): Maximum side length, defaults to -1 == no resizing
         output_path (Path): Output path, defaults to None == same directory as image
 
     Returns:
         Path: Path to the thumbnail
     """
-    image = Path(image)
-    thumb_path = output_path or image.with_name(f"{image.stem}.thumb.jpg")
+    file = Path(file)
+    thumb_path = output_path or file.with_name(f"{file.stem}.thumb.jpg")
     if not thumb_path.is_file():
-        if image.suffix in [".mp4", ".webm"]:
-            thumb = create_tg_thumbnail_from_video(image, max_side_length)
+        if file.suffix in [".mp4", ".webm"]:
+            thumb = create_tg_thumbnail_from_video(file, max_side_length)
         else:
-            thumb = create_tg_thumbnail(image, max_side_length)
+            thumb = create_tg_thumbnail(file, max_side_length)
 
         thumb.save(thumb_path, format="JPEG", quality=70)
         thumb.close()

@@ -18,3 +18,4 @@ TG_BASE_URL = "https://api.telegram.org/bot"
 THUMB_MAX_SIDE_LENGTH = 1024
 
 ImageLike = Path | BytesIO | Image.Image
+FileLike = Path | BytesIO
