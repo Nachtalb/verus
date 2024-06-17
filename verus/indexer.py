@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -139,6 +140,14 @@ class Indexer:
 
             self.logger.info("Found %d new media files", len(new_files_v1))
             hashes = self.load_image_hashes(list(new_files_v1))
+
+            duplicates = [hash for hash, count in Counter(hashes.values()).items() if count > 1]
+            if duplicates:
+                self.logger.warning("Found %d duplicate hashes", len(duplicates))
+                for hash in duplicates:
+                    path = next(file for file, h in hashes.items() if h == hash)
+                    hashes.pop(path)
+                    path.unlink()
 
             new_files_v2 = {file for file, hash in hashes.items() if hash not in known_hashes}
 
