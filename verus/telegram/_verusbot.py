@@ -163,7 +163,14 @@ class VerusBot:
         for index, chunk in enumerate(chunk_iterable(media_group, 10)):
             if index > 1:
                 await asyncio.sleep(1)
-            messages.extend(await message.reply_media_group(list(chunk)))
+            messages.extend(
+                await message.reply_media_group(
+                    list(chunk),
+                    read_timeout=60,
+                    pool_timeout=60,
+                    write_timeout=60,
+                )
+            )
 
         self._intermediate_group_message = tuple(messages)
 
