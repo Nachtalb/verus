@@ -3,7 +3,23 @@ import itertools
 from functools import cache
 from pathlib import Path
 
-from verus.const import SUPPORTED_EXTENSIONS, SUPPORTED_EXTENSIONS_GLOB
+from verus.const import SUPPORTED_EXTENSIONS, SUPPORTED_EXTENSIONS_GLOB, VIDEO_EXTENSIONS
+
+
+def is_video(path: Path | str, or_gif: bool = False) -> bool:
+    """Check if a file is a video.
+
+    Args:
+        path (`Path` | `str`):
+            The path to the file to check.
+        or_gif (`bool`, optional):
+            Whether to consider GIFs as videos. Defaults to False.
+
+    Returns:
+        `bool`: Whether the file is a video.
+    """
+    path = Path(path)
+    return path.suffix.lower().lstrip(".") in VIDEO_EXTENSIONS or (or_gif and path.suffix.lower() == "gif")
 
 
 @cache

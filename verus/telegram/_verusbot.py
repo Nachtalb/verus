@@ -31,7 +31,7 @@ from telegram.ext import Application, CallbackQueryHandler, CommandHandler, Cont
 from verus.const import TG_MAX_DOWNLOAD_SIZE
 from verus.db import History, Media, MediaTag, Tag, User, atomic
 from verus.db.history import history_action
-from verus.files import get_supported_files, hash_bytes, hash_file, is_supported
+from verus.files import get_supported_files, hash_bytes, hash_file, is_supported, is_video
 from verus.image import create_and_save_tg_thumbnail, get_dimensions
 from verus.indexer import Indexer
 from verus.telegram._veruscontext import VerusContext
@@ -193,7 +193,7 @@ class VerusBot:
         reply_markup = self._buttons(media)
 
         try:
-            send_func = self.send_video if media.path.endswith((".mp4", ".gif")) else self.send_photo
+            send_func = self.send_video if is_video(media.path, True) else self.send_photo
             new_msg = await send_func(
                 media,
                 message,  # type: ignore[arg-type]

@@ -6,6 +6,7 @@ import cv2
 from PIL import Image, ImageFile
 
 from verus.const import TG_MAX_IMAGE_RATIO, TG_MAX_TOTAL_IMAGE_SIDE_LENGTH, THUMB_MAX_SIDE_LENGTH, FileLike, ImageLike
+from verus.files import is_video
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
@@ -105,7 +106,7 @@ def create_and_save_tg_thumbnail(
     file = Path(file)
     thumb_path = output_path or file.with_name(f"{file.stem}.thumb.jpg")
     if not thumb_path.is_file():
-        if file.suffix in [".mp4", ".webm"]:
+        if is_video(file):
             thumb = create_tg_thumbnail_from_video(file, max_side_length)
         else:
             thumb = create_tg_thumbnail(file, max_side_length)
