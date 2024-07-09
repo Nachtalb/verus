@@ -72,8 +72,8 @@ class VerusBot:
 
         default_filter = filters.ChatType.PRIVATE & multi_user_filter
 
-        application.add_handler(CommandHandler("start", self.start, filters=default_filter))
-        application.add_handler(CommandHandler("info", self.info, filters=default_filter))
+        application.add_handler(CommandHandler("start", self.start, filters=default_filter, block=False))
+        application.add_handler(CommandHandler("info", self.info, filters=default_filter, block=False))
         application.add_handler(CommandHandler("refresh", self.refresh, filters=default_filter))
         application.add_handler(CommandHandler("undo", self.undo, filters=default_filter))
         application.add_handler(CallbackQueryHandler(self.button))
