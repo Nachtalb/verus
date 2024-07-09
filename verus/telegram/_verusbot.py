@@ -9,6 +9,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import cast
 
+from peewee import fn
 from tabulate import tabulate
 from telegram import (
     Animation,
@@ -463,11 +464,29 @@ class VerusBot:
         )
 
     def _previous_tags(self, exclude: Media | None = None) -> list[Tag]:
-        last_action = History.latest_action(exclude)
+        last_action = self._last_media_action_with_more_than_one_tag(exclude)
+
+        if not last_action:
+            last_action = History.latest_action(exclude)
+
         if not last_action:
             return []
 
         return list(last_action.media.tags)
+
+    def _last_media_action_with_more_than_one_tag(self, exclude: Media | None = None) -> History | None:
+        media_with_tags = Media.select(Media.id).join(MediaTag).group_by(Media.id).having(fn.COUNT(MediaTag.tag) >= 2)
+
+        if exclude:
+            media_with_tags = media_with_tags.where(Media.id != exclude.id)
+
+        return (  # type: ignore[no-any-return]
+            History.select(History, Media)
+            .join(Media)
+            .where(Media.id.in_(media_with_tags))
+            .order_by(History.timestamp.desc())
+            .get()
+        )
 
     async def button(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
@@ -638,6 +657,7 @@ class VerusBot:
             return
 
         msg_id = update.message.message_id
+        self.logger.info("Receiving media from %s message id: %d", update.effective_user.id, msg_id)
 
         # check validity
         try:
