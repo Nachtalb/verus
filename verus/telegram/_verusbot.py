@@ -225,6 +225,7 @@ class VerusBot:
         categories = ", ".join([tag.name for tag in media.tags])
         processed_images = Media.select().where(Media._processed == True).count()  # noqa: E712
         total_images = Media.select().count()
+
         caption = (
             f"<b>Category: {categories}</b>\n"
             f"Mode: {'toggle' if self._tag_mode else 'move'}\n"
@@ -338,7 +339,11 @@ class VerusBot:
             for tag in self.tags
         }
 
-        per_category_str = tabulate(per_category.items(), headers=["Category", "Count"], tablefmt="grid")
+        per_category_str = tabulate(
+            sorted(per_category.items(), key=lambda t: t[1] * -1),  # type: ignore[index]
+            headers=["Category", "Count"],
+            tablefmt="grid",
+        )
 
         await update.message.reply_text(
             f"Current image: `{media and media.path or 'None'}`\n"
