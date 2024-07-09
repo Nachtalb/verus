@@ -71,11 +71,13 @@ class Webapp:
         if not update:
             abort(Response(status=HTTPStatus.BAD_REQUEST, response="Update could not be processed"))
 
-        self.logger.debug("Received Update with ID %d on Webhook", update.update_id)
+        self.logger.debug("[%d] Received Update on Webhook", update.update_id)
         if isinstance(self.bot, ExtBot):
             self.bot.insert_callback_data(update)
 
+        self.logger.info("[%d] Putting update into queue", update.update_id)
         await self.app.update_queue.put(update)
+        self.logger.info("[%d] Update put into queue", update.update_id)
         return Response(status=HTTPStatus.OK)
 
     async def custom_updates(self) -> Response:

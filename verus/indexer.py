@@ -37,7 +37,7 @@ class Indexer:
         self.extensions = extensions
 
     def index_file(self, path: Path, hash: str, tag: Tag) -> tuple[Media, bool]:
-        """Index a single image.
+        """Index a single file.
 
         Args:
             path (`Path`):
@@ -51,7 +51,7 @@ class Indexer:
             `tuple[Media, bool]`:
                 The indexed image and whether the image was new.
         """
-        self.logger.info("Indexing single image %s", path)
+        self.logger.info("Indexing single file %s", path)
 
         media = Media.get_or_none(Media.sha256 == hash)
 
@@ -74,7 +74,7 @@ class Indexer:
         return media, True
 
     def index_single(self, path: Path, tag: Tag, check_stale: bool = True) -> tuple[Media | None, bool]:
-        """Index a single image.
+        """Index a single file.
 
         Note:
             Stale files will be removed from the DB.
@@ -91,7 +91,7 @@ class Indexer:
             `tuple[Media | None, bool]`:
                 The indexed image and whether the image was new.
         """
-        self.logger.info("Indexing single image %s", path)
+        self.logger.info("Indexing single file %s", path)
         file_hash = hash_file(path)
 
         media = Media.get_or_none(Media.sha256 == file_hash)
