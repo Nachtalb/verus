@@ -61,6 +61,7 @@ class VerusBot:
 
         self.tags = Tag.select()
         self.indexer = Indexer(self.dir)
+        self.last_start_index = 0
 
     def setup_hooks(self, application: Application, web_prefix: str) -> None:  # type: ignore[type-arg]
         user_filters = [filters.User(user.telegram_id) for user in User.select().where(User.telegram_id.is_null(False))]
@@ -230,6 +231,12 @@ class VerusBot:
             f"Group ID: <code>{media.group_id or '-'}</code>\n"
             f"Progress: {processed_images}/{total_images} {processed_images/total_images*100:.2f}%"
         )
+
+        if self.last_start_index != 0:
+            processed_since_last_start = processed_images - self.last_start_index
+            total_since_last_start = total_images - self.last_start_index
+
+            caption += f" | {processed_since_last_start}/{total_since_last_start} {processed_since_last_start/total_since_last_start*100:.2f}%"
         return caption
 
     def photo_or_raw(self, media: Media, as_thumbnail: bool = True) -> PhotoSize | BytesIO:
@@ -308,6 +315,9 @@ class VerusBot:
         if not update.effective_user or not update.message:
             return
 
+        processed_images = Media.select().where(Media._processed == True).count()  # noqa: E712
+
+        self.last_start_index = int(processed_images)
         await self._next_image(update)
 
     async def info(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
