@@ -3,9 +3,9 @@ from pathlib import Path
 
 from PIL import Image
 
-SUPPORTED_EXTENSIONS = ["jpeg", "jpg", "png", "gif", "webp", "mp4"]
-VIDEO_EXTENSIONS = ["mp4"]
+VIDEO_EXTENSIONS = ["mp4", "mov"]
 IMAGE_EXTENSIONS = ["jpeg", "jpg", "png", "gif", "webp"]
+SUPPORTED_EXTENSIONS = VIDEO_EXTENSIONS + IMAGE_EXTENSIONS
 
 SUPPORTED_EXTENSIONS_GLOB = ["*." + ext for ext in SUPPORTED_EXTENSIONS]
 
