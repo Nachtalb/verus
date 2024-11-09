@@ -150,6 +150,11 @@ class Indexer:
                     path.unlink()
 
             new_files_v2 = {file for file, hash in hashes.items() if hash not in known_hashes}
+            old_files = {file for file, hash in hashes.items() if hash in known_hashes}
+
+            if old_files:
+                self.logger.info("Found %d old media files", len(old_files))
+                self.logger.info("\n".join([str(file) for file in old_files]))
 
             if len(new_files_v1) < len(new_files_v2):
                 for file in new_files_v1 - new_files_v2:
