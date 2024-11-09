@@ -616,7 +616,10 @@ class VerusBot:
             if not user.telegram_id:
                 continue
             self.logger.info("Sending message to %s", user.telegram_id)
-            await application.bot.send_message(user.telegram_id, "Media Sorting Bot started.")
+            try:
+                await application.bot.send_message(user.telegram_id, "Media Sorting Bot started.")
+            except BadRequest:
+                self.logger.warning("User %s blocked the bot.", user.telegram_id)
 
     async def post_stop(self, application: Application) -> None:  # type: ignore[type-arg]
         self.logger.info("Media Sorting Bot stopped.")
@@ -624,7 +627,10 @@ class VerusBot:
             if not user.telegram_id:
                 continue
             self.logger.info("Sending message to %s", user.telegram_id)
-            await application.bot.send_message(user.telegram_id, "Media Sorting Bot stopped.")
+            try:
+                await application.bot.send_message(user.telegram_id, "Media Sorting Bot stopped.")
+            except BadRequest:
+                self.logger.warning("User %s blocked the bot.", user.telegram_id)
 
     def hash_str_to_int(self, s: str) -> int:
         hash_value = int(hashlib.sha256(s.encode()).hexdigest(), 16)
