@@ -7,7 +7,7 @@ from verus.telegram._webhookupdate import WebhookUpdate
 __all__ = ["WebRouteHandler"]
 
 
-class WebRouteHandler(TypeHandler[WebhookUpdate, VerusContext]):
+class WebRouteHandler(TypeHandler[WebhookUpdate, VerusContext, None]):
     def __init__(
         self,
         callback: HandlerCallback[WebhookUpdate, VerusContext, None],
