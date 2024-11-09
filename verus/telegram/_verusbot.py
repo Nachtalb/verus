@@ -157,7 +157,7 @@ class VerusBot:
         media_group = []
         for index, item in enumerate(group):
             photo = self.photo_or_raw(item)
-            if index == 0:
+            if id and index == 0:
                 input_ = InputMediaPhoto(media=photo, caption=f"ID: {id}\nPixiv: {pixiv_url}")
             else:
                 input_ = InputMediaPhoto(media=photo)
