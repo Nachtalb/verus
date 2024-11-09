@@ -192,11 +192,9 @@ class VerusBot:
             media = Media.unprocessed().first()
 
         if media is None:
+            await message.chat.send_message("No more images to process.")
             if is_update:
                 await message.delete()  # type: ignore[union-attr]
-                await message.chat.send_message("No more images to process.")
-            else:
-                await message.reply_text("No more images to process.")  # type: ignore[union-attr]
             return
 
         self.logger.info("Current image: %s %s", media.path, media.sha256)
