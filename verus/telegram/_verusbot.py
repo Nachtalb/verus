@@ -4,7 +4,6 @@ import logging
 import re
 import shutil
 from contextlib import nullcontext
-from functools import reduce
 from io import BytesIO
 from pathlib import Path
 from typing import cast
@@ -64,17 +63,20 @@ class VerusBot:
         self.indexer = Indexer(self.dir)
         self.last_start_index = 0
 
-    def setup_hooks(self, application: Application, web_prefix: str) -> None:  # type: ignore[type-arg]
-        user_filters = [filters.User(user.telegram_id) for user in User.select().where(User.telegram_id.is_null(False))]
-        multi_user_filter = user_filters[0]
-        if len(user_filters) > 1:
-            multi_user_filter = reduce(lambda x, y: x | y, user_filters)  # type: ignore[arg-type, return-value]
+        self._user_filter: filters.User = filters.User([])
 
-        default_filter = filters.ChatType.PRIVATE & multi_user_filter
+    def update_user_filter(self) -> None:
+        user_ids = frozenset([user.telegram_id for user in User.select().where(User.telegram_id.is_null(False))])
+        self._user_filter.chat_ids = user_ids
+
+    def setup_hooks(self, application: Application, web_prefix: str) -> None:  # type: ignore[type-arg]
+        self.update_user_filter()
+        default_filter = filters.ChatType.PRIVATE & self._user_filter
 
         application.add_handler(CommandHandler("start", self.start, filters=default_filter, block=False))
         application.add_handler(CommandHandler("info", self.info, filters=default_filter, block=False))
         application.add_handler(CommandHandler("refresh", self.refresh, filters=default_filter))
+        application.add_handler(CommandHandler("reload", self.reload, filters=default_filter))
         application.add_handler(CommandHandler("undo", self.undo, filters=default_filter))
         application.add_handler(CallbackQueryHandler(self.button))
         application.add_handler(
@@ -355,6 +357,19 @@ class VerusBot:
             parse_mode=ParseMode.MARKDOWN,
         )
 
+    async def reload(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not update.effective_user or not update.message:
+            return
+
+        before = self._user_filter.chat_ids
+        self.update_user_filter()
+        after = self._user_filter.chat_ids
+
+        if before == after:
+            await update.message.reply_text("Nothing changed.")
+        else:
+            await update.message.reply_text(f"Reloaded user filter. Before: {len(before)}, After: {len(after)}")
+
     async def refresh(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_user or not update.message:
             return
@@ -609,6 +624,7 @@ class VerusBot:
                 ("info", "Show information about the bot"),
                 ("refresh", "Refresh the database"),
                 ("undo", "Undo the last action"),
+                ("reload", "Reload the user filter"),
             ]
         )
 
